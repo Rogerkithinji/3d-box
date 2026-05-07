@@ -7,6 +7,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import {
   ALL_SHAPE_IDS, SHAPE_LABELS, getParametricShape,
+  CUBE_CONTROLS, CUBE_DEFAULT_PARAMS,
   type ShapeId, type ShapeParams,
 } from "@/lib/shapes"
 
@@ -24,7 +25,10 @@ export default function Home() {
 
   const rotation = (rotDeg / 90) * (Math.PI / 2)
   const shapeDef = shapeId !== "cube" ? getParametricShape(shapeId) : null
-  const params   = shapeDef ? { ...shapeDef.defaultParams, ...shapeParams } : {}
+  const params   = shapeId === "cube"
+    ? { ...CUBE_DEFAULT_PARAMS, ...shapeParams }
+    : shapeDef ? { ...shapeDef.defaultParams, ...shapeParams } : {}
+  const controls = shapeId === "cube" ? CUBE_CONTROLS : (shapeDef?.controls ?? [])
 
   const handleShapeChange = (id: ShapeId) => {
     setShapeId(id)
@@ -110,7 +114,7 @@ export default function Home() {
         </div>
 
         {/* Shape-specific params */}
-        {shapeDef && shapeDef.controls.map(ctrl => (
+        {controls.map(ctrl => (
           <div key={ctrl.key} className="flex flex-col gap-3">
             <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
               {ctrl.label}

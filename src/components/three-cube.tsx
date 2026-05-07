@@ -57,43 +57,7 @@ export function ThreeCube({
 
     const scene = new THREE.Scene()
 
-    // ── Cube: depth mask + front shade + ghost + solid ────────────
-    const geo   = new THREE.BoxGeometry(HALF * 2, HALF * 2, HALF * 2)
-    const edges = new THREE.EdgesGeometry(geo)
-
-    const depthMesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
-    )
-    depthMesh.renderOrder = 0
-
-    const frontShade = new THREE.Mesh(
-      new THREE.PlaneGeometry(HALF * 2, HALF * 2),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color("#c8d5ff"),
-        transparent: true, opacity: 0.3,
-        side: THREE.FrontSide, depthWrite: false,
-      }),
-    )
-    frontShade.position.z = HALF
-    frontShade.renderOrder = 1
-
-    const cubeGhost = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({
-        color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false,
-      }),
-    )
-    cubeGhost.renderOrder = 2
-
-    const cubeSolid = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
-    )
-    cubeSolid.renderOrder = 3
-
     const cubeGroup = new THREE.Group()
-    cubeGroup.add(depthMesh, frontShade, cubeGhost, cubeSolid)
     scene.add(cubeGroup)
 
     // ── Parametric shape placeholder ──────────────────────────────
@@ -122,7 +86,7 @@ export function ThreeCube({
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
-    (rot: number, vertPos: number, guides: boolean, sid: ShapeId) => {
+    (rot: number, vertPos: number, guides: boolean, sid: ShapeId, hw: number, hh: number, hd: number) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -189,9 +153,9 @@ export function ThreeCube({
             [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1],
           ] as [number,number,number][]
         ).map(([lx, ly, lz]) => {
-          const rx = cos * lx * HALF - sin * lz * HALF
-          const ry = ly * HALF + vertPos
-          const rz = sin * lx * HALF + cos * lz * HALF
+          const rx = cos * lx * hw - sin * lz * hd
+          const ry = ly * hh + vertPos
+          const rz = sin * lx * hw + cos * lz * hd
           return toScreen(rx, ry, rz)
         })
 
@@ -239,8 +203,54 @@ export function ThreeCube({
     const { renderer, scene, camera, cubeGroup, shapeGroup } = three
 
     if (shapeId === "cube") {
-      cubeGroup.visible  = true
       shapeGroup.visible = false
+
+      const hw = (shapeParams.width  ?? HALF * 2) / 2
+      const hh = (shapeParams.height ?? HALF * 2) / 2
+      const hd = (shapeParams.depth  ?? HALF * 2) / 2
+
+      const toDispose: THREE.BufferGeometry[] = []
+      cubeGroup.traverse(obj => {
+        const o = obj as THREE.Mesh | THREE.LineSegments
+        if (o.geometry) toDispose.push(o.geometry)
+      })
+      cubeGroup.clear()
+      toDispose.forEach(g => g.dispose())
+
+      const geo   = new THREE.BoxGeometry(hw * 2, hh * 2, hd * 2)
+      const edges = new THREE.EdgesGeometry(geo)
+
+      const depthMesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
+      )
+      depthMesh.renderOrder = 0
+
+      const frontShade = new THREE.Mesh(
+        new THREE.PlaneGeometry(hw * 2, hh * 2),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color("#c8d5ff"),
+          transparent: true, opacity: 0.3,
+          side: THREE.FrontSide, depthWrite: false,
+        }),
+      )
+      frontShade.position.z = hd
+      frontShade.renderOrder = 1
+
+      const cubeGhost = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }),
+      )
+      cubeGhost.renderOrder = 2
+
+      const cubeSolid = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
+      )
+      cubeSolid.renderOrder = 3
+
+      cubeGroup.add(depthMesh, frontShade, cubeGhost, cubeSolid)
+      cubeGroup.visible    = true
       cubeGroup.rotation.y = -rotation
       cubeGroup.position.y  = verticalPosition
     } else {
@@ -332,9 +342,13 @@ export function ThreeCube({
       shapeGroup.position.y  = verticalPosition
     }
 
+    const hw = (shapeParams.width  ?? HALF * 2) / 2
+    const hh = (shapeParams.height ?? HALF * 2) / 2
+    const hd = (shapeParams.depth  ?? HALF * 2) / 2
+
     const run = () => {
       renderer.render(scene, camera)
-      drawOverlay(rotation, verticalPosition, showGuides, shapeId)
+      drawOverlay(rotation, verticalPosition, showGuides, shapeId, hw, hh, hd)
     }
 
     renderRef.current = run

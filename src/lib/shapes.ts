@@ -102,6 +102,14 @@ export const PARAMETRIC_SHAPES: ParametricShapeDef[] = [
   },
 ]
 
+export const CUBE_CONTROLS: ControlDef[] = [
+  { key: "width",  label: "WIDTH",  min: 0.4, max: 2.0, step: 0.01 },
+  { key: "height", label: "HEIGHT", min: 0.4, max: 2.0, step: 0.01 },
+  { key: "depth",  label: "DEPTH",  min: 0.4, max: 2.0, step: 0.01 },
+]
+
+export const CUBE_DEFAULT_PARAMS: ShapeParams = { width: 1.1, height: 1.1, depth: 1.1 }
+
 export function getParametricShape(id: ShapeId): ParametricShapeDef | undefined {
   return PARAMETRIC_SHAPES.find(s => s.id === id)
 }
