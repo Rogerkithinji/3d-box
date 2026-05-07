@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import * as THREE from "three"
-import { getParametricShape, SHAPE_LABELS, type ShapeId, type ShapeParams } from "@/lib/shapes"
+import { SHAPE_LABELS, type ShapeId, type ShapeParams } from "@/lib/shapes"
 
 interface Props {
   shapeId:          ShapeId
@@ -12,6 +12,7 @@ interface Props {
   rotation:         number
   verticalPosition: number
   showGuides:       boolean
+  showContours:     boolean
 }
 
 const INK       = "#5B5BD6"
@@ -20,7 +21,7 @@ const HALF      = 0.55
 
 export function ThreeCube({
   shapeId, shapeParams, uRings, vLines,
-  rotation, verticalPosition, showGuides,
+  rotation, verticalPosition, showGuides, showContours,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -246,89 +247,87 @@ export function ThreeCube({
       cubeGroup.visible  = false
       shapeGroup.visible = true
 
-      const shapeDef = getParametricShape(shapeId)
-      if (shapeDef) {
-        const uSamples = uRings + 2
-        const vSamples = vLines
+      const radius = shapeParams.radius ?? 0.5
+      const height = shapeParams.height ?? 1.5
+      const SEGS   = 64  // smooth circle
 
-        // Sample surface
-        const grid: [number, number, number][][] = []
-        for (let ui = 0; ui < uSamples; ui++) {
-          const row: [number, number, number][] = []
-          for (let vi = 0; vi < vSamples; vi++) {
-            row.push(shapeDef.surface(ui / (uSamples - 1), vi / vSamples, shapeParams))
-          }
-          grid.push(row)
+      // Dispose old
+      const toDispose: THREE.BufferGeometry[] = []
+      shapeGroup.traverse(obj => {
+        const o = obj as THREE.Mesh | THREE.LineSegments
+        if (o.geometry) toDispose.push(o.geometry)
+      })
+      shapeGroup.clear()
+      toDispose.forEach(g => g.dispose())
+
+      // ── Depth mask: closed solid cylinder (barrel + caps) ────────
+      // Caps seal the depth buffer so back edges are properly blocked.
+      const maskGeo = new THREE.CylinderGeometry(radius, radius, height, SEGS, 1, false)
+      const depthMask = new THREE.Mesh(
+        maskGeo,
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
+      )
+      depthMask.renderOrder = 0
+
+      // ── Edge geometry ────────────────────────────────────────────
+      const edgePos: number[] = []
+
+      // Smooth ring at height y
+      const addRing = (y: number) => {
+        for (let i = 0; i < SEGS; i++) {
+          const a1 = 2 * Math.PI * i / SEGS
+          const a2 = 2 * Math.PI * (i + 1) / SEGS
+          edgePos.push(
+            radius * Math.cos(a1), y, radius * Math.sin(a1),
+            radius * Math.cos(a2), y, radius * Math.sin(a2),
+          )
         }
-
-        // ── Depth mask mesh (same role as for the cube) ──────────
-        const maskVerts: number[] = []
-        for (let ui = 0; ui < uSamples; ui++)
-          for (let vi = 0; vi < vSamples; vi++) {
-            const [x, y, z] = grid[ui][vi]
-            maskVerts.push(x, y, z)
-          }
-        const maskIdx: number[] = []
-        for (let ui = 0; ui < uSamples - 1; ui++)
-          for (let vi = 0; vi < vSamples; vi++) {
-            const nv = (vi + 1) % vSamples
-            const a = ui * vSamples + vi,      b = ui * vSamples + nv
-            const c = (ui + 1) * vSamples + vi, d = (ui + 1) * vSamples + nv
-            maskIdx.push(a, c, d,  a, d, b)
-          }
-        const maskGeo = new THREE.BufferGeometry()
-        maskGeo.setAttribute("position", new THREE.Float32BufferAttribute(maskVerts, 3))
-        maskGeo.setIndex(maskIdx)
-        const depthMask = new THREE.Mesh(
-          maskGeo,
-          new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
-        )
-        depthMask.renderOrder = 0
-
-        // ── Contour lines: ghost (all, no depth) + solid (front only) ─
-        const positions: number[] = []
-        for (let ui = 1; ui < uSamples - 1; ui++)
-          for (let vi = 0; vi < vSamples; vi++) {
-            const [x1, y1, z1] = grid[ui][vi]
-            const [x2, y2, z2] = grid[ui][(vi + 1) % vSamples]
-            positions.push(x1, y1, z1, x2, y2, z2)
-          }
-        for (let vi = 0; vi < vSamples; vi++)
-          for (let ui = 0; ui < uSamples - 1; ui++) {
-            const [x1, y1, z1] = grid[ui][vi]
-            const [x2, y2, z2] = grid[ui + 1][vi]
-            positions.push(x1, y1, z1, x2, y2, z2)
-          }
-
-        // Dispose old, swap in new
-        const toDispose: THREE.BufferGeometry[] = []
-        shapeGroup.traverse(obj => {
-          if ((obj as THREE.Mesh).isMesh || (obj as THREE.LineSegments).isLineSegments)
-            toDispose.push((obj as THREE.Mesh).geometry)
-        })
-        shapeGroup.clear()
-        toDispose.forEach(g => g.dispose())
-
-        const geo = new THREE.BufferGeometry()
-        geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
-
-        const ghost = new THREE.LineSegments(
-          geo,
-          new THREE.LineBasicMaterial({
-            color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false,
-          }),
-        )
-        ghost.renderOrder = 2
-
-        const solid = new THREE.LineSegments(
-          geo,
-          new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
-        )
-        solid.renderOrder = 3
-
-        shapeGroup.add(depthMask, ghost, solid)
       }
 
+      // Top and bottom circles always shown
+      addRing( height / 2)
+      addRing(-height / 2)
+
+      // Contour rings in between
+      if (showContours) {
+        for (let i = 1; i <= uRings; i++) {
+          addRing(-height / 2 + height * i / (uRings + 1))
+        }
+      }
+
+      // Silhouette lines — in local space the tangent angles are -rotation and π-rotation.
+      // After the group rotates by -rotation these land at world x = ±radius, z = 0,
+      // which are exactly the left and right silhouettes as seen from the camera.
+      const VSEGS = 32
+      for (const a of [-rotation, Math.PI - rotation]) {
+        const sx = radius * Math.cos(a), sz = radius * Math.sin(a)
+        for (let i = 0; i < VSEGS; i++) {
+          const y1 = -height / 2 + height * i / VSEGS
+          const y2 = -height / 2 + height * (i + 1) / VSEGS
+          edgePos.push(sx, y1, sz, sx, y2, sz)
+        }
+      }
+
+      const edgeGeo = new THREE.BufferGeometry()
+      edgeGeo.setAttribute("position", new THREE.Float32BufferAttribute(edgePos, 3))
+
+      // Ghost: all edges always visible at low opacity
+      const ghost = new THREE.LineSegments(
+        edgeGeo,
+        new THREE.LineBasicMaterial({
+          color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false,
+        }),
+      )
+      ghost.renderOrder = 2
+
+      // Solid: only edges that pass depth test (front half)
+      const solid = new THREE.LineSegments(
+        edgeGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
+      )
+      solid.renderOrder = 3
+
+      shapeGroup.add(depthMask, ghost, solid)
       shapeGroup.rotation.y = -rotation
       shapeGroup.position.y  = verticalPosition
     }
@@ -340,7 +339,7 @@ export function ThreeCube({
 
     renderRef.current = run
     run()
-  }, [shapeId, shapeParams, uRings, vLines, rotation, verticalPosition, showGuides, drawOverlay])
+  }, [shapeId, shapeParams, uRings, vLines, rotation, verticalPosition, showGuides, showContours, drawOverlay])
 
   return (
     <div

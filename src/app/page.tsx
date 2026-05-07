@@ -16,7 +16,8 @@ export default function Home() {
   const [shapeId,     setShapeId]     = useState<ShapeId>("cube")
   const [shapeParams, setShapeParams] = useState<ShapeParams>({})
   const [uRings,      setURings]      = useState(6)
-  const [vLines,      setVLines]      = useState(16)
+  const [vLines,      setVLines]      = useState(8)
+  const [showContours, setShowContours] = useState(true)
   const [rotDeg,      setRotDeg]      = useState(35)
   const [vertPos,     setVertPos]     = useState(0)
   const [guides,      setGuides]      = useState(true)
@@ -43,6 +44,7 @@ export default function Home() {
           rotation={rotation}
           verticalPosition={vertPos}
           showGuides={guides}
+          showContours={showContours}
         />
       </div>
 
@@ -128,37 +130,30 @@ export default function Home() {
           </div>
         ))}
 
-        {/* Contour density controls for parametric shapes */}
-        {shapeId !== "cube" && (
-          <>
-            <div className="flex flex-col gap-3">
-              <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-                U RINGS
-              </Label>
-              <Slider
-                min={2} max={16} step={1}
-                value={uRings}
-                onValueChange={(v) => setURings(v as number)}
-              />
-              <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-                {uRings}
-              </p>
-            </div>
+        {/* Contour ring count — only visible when contours are on */}
+        {shapeId !== "cube" && showContours && (
+          <div className="flex flex-col gap-3">
+            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+              CONTOUR RINGS
+            </Label>
+            <Slider
+              min={1} max={16} step={1}
+              value={uRings}
+              onValueChange={(v) => setURings(v as number)}
+            />
+            <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
+              {uRings} ring{uRings !== 1 ? "s" : ""}
+            </p>
+          </div>
+        )}
 
-            <div className="flex flex-col gap-3">
-              <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-                V LINES
-              </Label>
-              <Slider
-                min={4} max={32} step={1}
-                value={vLines}
-                onValueChange={(v) => setVLines(v as number)}
-              />
-              <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-                {vLines}
-              </p>
-            </div>
-          </>
+        {shapeId !== "cube" && (
+          <div className="flex items-center gap-3">
+            <Switch checked={showContours} onCheckedChange={setShowContours} />
+            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+              SHOW CONTOURS
+            </Label>
+          </div>
         )}
 
         <div className="flex items-center gap-3">
