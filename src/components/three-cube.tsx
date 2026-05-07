@@ -137,7 +137,7 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
       // Focal lengths in pixels from camera FOV
       const vFOV = (camera.fov * Math.PI) / 180
       const f_y  = H / 2 / Math.tan(vFOV / 2)
-      const f_x  = f_y * camera.aspect
+      const f_x  = f_y
 
       const hy = H / 2 // horizon always at screen centre
 
@@ -186,9 +186,9 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
             [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1],
           ] as [number,number,number][]
         ).map(([lx, ly, lz]) => {
-          const rx = cos * lx * HALF + sin * lz * HALF
+          const rx = cos * lx * HALF - sin * lz * HALF
           const ry = ly * HALF + vertPos
-          const rz = -sin * lx * HALF + cos * lz * HALF
+          const rz = sin * lx * HALF + cos * lz * HALF
           return toScreen(rx, ry, rz)
         })
 
@@ -234,7 +234,7 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
     if (!three) return
     const { renderer, scene, camera, group } = three
 
-    group.rotation.y = rotation
+    group.rotation.y = -rotation
     group.position.y  = verticalPosition
 
     const run = () => {
