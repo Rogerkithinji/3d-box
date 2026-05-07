@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import {
-  ALL_SHAPE_IDS, SHAPE_LABELS, getParametricShape,
+  SHAPE_LABELS, getParametricShape,
   CUBE_CONTROLS, CUBE_DEFAULT_PARAMS,
   type ShapeId, type ShapeParams,
 } from "@/lib/shapes"
@@ -14,16 +14,13 @@ import {
 const INK = "#5B5BD6"
 
 export default function Home() {
-  const [shapeId,     setShapeId]     = useState<ShapeId>("cube")
-  const [shapeParams, setShapeParams] = useState<ShapeParams>({})
-  const [uRings,      setURings]      = useState(6)
-  const [vLines,      setVLines]      = useState(8)
+  const [shapeId,      setShapeId]      = useState<ShapeId>("cube")
+  const [shapeParams,  setShapeParams]  = useState<ShapeParams>({})
+  const [uRings,       setURings]       = useState(6)
   const [showContours, setShowContours] = useState(true)
-  const [rotDeg,      setRotDeg]      = useState(35)
-  const [vertPos,     setVertPos]     = useState(0)
-  const [guides,      setGuides]      = useState(true)
+  const [vertPos,      setVertPos]      = useState(0)
+  const [guides,       setGuides]       = useState(true)
 
-  const rotation = (rotDeg / 90) * (Math.PI / 2)
   const shapeDef = shapeId !== "cube" ? getParametricShape(shapeId) : null
   const params   = shapeId === "cube"
     ? { ...CUBE_DEFAULT_PARAMS, ...shapeParams }
@@ -44,8 +41,6 @@ export default function Home() {
           shapeId={shapeId}
           shapeParams={params}
           uRings={uRings}
-          vLines={vLines}
-          rotation={rotation}
           verticalPosition={vertPos}
           showGuides={guides}
           showContours={showContours}
@@ -96,20 +91,6 @@ export default function Home() {
           />
           <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
             {vertPos > 0.06 ? "above eye level" : vertPos < -0.06 ? "below eye level" : "at eye level"}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-            Y-AXIS ROTATION
-          </Label>
-          <Slider
-            min={5} max={85} step={1}
-            value={rotDeg}
-            onValueChange={(v) => setRotDeg(v as number)}
-          />
-          <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-            {rotDeg}°
           </p>
         </div>
 
@@ -168,6 +149,8 @@ export default function Home() {
         </div>
 
         <div className="mt-auto font-mono text-xs leading-relaxed" style={{ color: `${INK}44` }}>
+          <p>Drag to orbit.</p>
+          <p>Scroll to zoom.</p>
           <p>Front edges solid.</p>
           <p>Hidden edges faint.</p>
         </div>
