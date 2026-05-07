@@ -33,8 +33,7 @@ export function ThreeCube({
     shapeGroup: THREE.Group
   } | null>(null)
 
-  const renderRef  = useRef<() => void>(() => {})
-  const shapeGeoRef = useRef<THREE.BufferGeometry | null>(null)
+  const renderRef = useRef<() => void>(() => {})
 
   // ── Init Three.js (runs once) ─────────────────────────────────────
   useEffect(() => {
@@ -262,30 +261,56 @@ export function ThreeCube({
           grid.push(row)
         }
 
-        // Build line segment pairs: u-rings (horizontal) + v-lines (vertical)
+        // ── Depth mask mesh (same role as for the cube) ──────────
+        const maskVerts: number[] = []
+        for (let ui = 0; ui < uSamples; ui++)
+          for (let vi = 0; vi < vSamples; vi++) {
+            const [x, y, z] = grid[ui][vi]
+            maskVerts.push(x, y, z)
+          }
+        const maskIdx: number[] = []
+        for (let ui = 0; ui < uSamples - 1; ui++)
+          for (let vi = 0; vi < vSamples; vi++) {
+            const nv = (vi + 1) % vSamples
+            const a = ui * vSamples + vi,      b = ui * vSamples + nv
+            const c = (ui + 1) * vSamples + vi, d = (ui + 1) * vSamples + nv
+            maskIdx.push(a, c, d,  a, d, b)
+          }
+        const maskGeo = new THREE.BufferGeometry()
+        maskGeo.setAttribute("position", new THREE.Float32BufferAttribute(maskVerts, 3))
+        maskGeo.setIndex(maskIdx)
+        const depthMask = new THREE.Mesh(
+          maskGeo,
+          new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
+        )
+        depthMask.renderOrder = 0
+
+        // ── Contour lines: ghost (all, no depth) + solid (front only) ─
         const positions: number[] = []
-        for (let ui = 1; ui < uSamples - 1; ui++) {
+        for (let ui = 1; ui < uSamples - 1; ui++)
           for (let vi = 0; vi < vSamples; vi++) {
             const [x1, y1, z1] = grid[ui][vi]
             const [x2, y2, z2] = grid[ui][(vi + 1) % vSamples]
             positions.push(x1, y1, z1, x2, y2, z2)
           }
-        }
-        for (let vi = 0; vi < vSamples; vi++) {
+        for (let vi = 0; vi < vSamples; vi++)
           for (let ui = 0; ui < uSamples - 1; ui++) {
             const [x1, y1, z1] = grid[ui][vi]
             const [x2, y2, z2] = grid[ui + 1][vi]
             positions.push(x1, y1, z1, x2, y2, z2)
           }
-        }
 
-        // Swap in new geometry
-        if (shapeGeoRef.current) shapeGeoRef.current.dispose()
+        // Dispose old, swap in new
+        const toDispose: THREE.BufferGeometry[] = []
+        shapeGroup.traverse(obj => {
+          if ((obj as THREE.Mesh).isMesh || (obj as THREE.LineSegments).isLineSegments)
+            toDispose.push((obj as THREE.Mesh).geometry)
+        })
         shapeGroup.clear()
+        toDispose.forEach(g => g.dispose())
 
         const geo = new THREE.BufferGeometry()
         geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
-        shapeGeoRef.current = geo
 
         const ghost = new THREE.LineSegments(
           geo,
@@ -301,7 +326,7 @@ export function ThreeCube({
         )
         solid.renderOrder = 3
 
-        shapeGroup.add(ghost, solid)
+        shapeGroup.add(depthMask, ghost, solid)
       }
 
       shapeGroup.rotation.y = -rotation

@@ -61,7 +61,7 @@ export default function Home() {
             SHAPE
           </Label>
           <div className="flex flex-wrap gap-1">
-            {ALL_SHAPE_IDS.map(id => (
+            {(["cube", "cylinder"] as ShapeId[]).map(id => (
               <button
                 key={id}
                 onClick={() => handleShapeChange(id)}
