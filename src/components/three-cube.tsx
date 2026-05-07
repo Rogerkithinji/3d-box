@@ -279,6 +279,24 @@ export function ThreeCube({
       )
       depthMask.renderOrder = 0
 
+      // ── Cap shades ───────────────────────────────────────────────
+      const capMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color("#c8d5ff"),
+        transparent: true, opacity: 0.3,
+        side: THREE.FrontSide, depthWrite: false,
+      })
+      const capGeo = new THREE.CircleGeometry(radius, SEGS)
+
+      const topCap = new THREE.Mesh(capGeo, capMat)
+      topCap.rotation.x = -Math.PI / 2
+      topCap.position.y = height / 2
+      topCap.renderOrder = 1
+
+      const bottomCap = new THREE.Mesh(capGeo, capMat)
+      bottomCap.rotation.x = Math.PI / 2
+      bottomCap.position.y = -height / 2
+      bottomCap.renderOrder = 1
+
       // ── Edge geometry ────────────────────────────────────────────
       const edgePos: number[] = []
 
@@ -337,7 +355,7 @@ export function ThreeCube({
       )
       solid.renderOrder = 3
 
-      shapeGroup.add(depthMask, ghost, solid)
+      shapeGroup.add(depthMask, topCap, bottomCap, ghost, solid)
       shapeGroup.rotation.y = -rotation
       shapeGroup.position.y  = verticalPosition
     }
