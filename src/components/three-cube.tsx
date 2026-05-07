@@ -65,12 +65,21 @@ export function ThreeCube({
         return [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]
       }
 
-      const hy = H / 2  // horizon at screen center (correct for horizontal orbit)
+      // Horizon y: shifts when camera tilts up/down
+      // tan(pitch) = forward.y / horizontal_length; positive pitch = looking up → horizon below center
+      const forward = new THREE.Vector3()
+      camera.getWorldDirection(forward)
+      const vFOV    = camera.fov * Math.PI / 180
+      const hLen    = Math.sqrt(forward.x * forward.x + forward.z * forward.z)
+      const tanPitch = hLen > 0.001 ? forward.y / hLen : (forward.y > 0 ? 1e6 : -1e6)
+      const hy = H / 2 + (tanPitch / Math.tan(vFOV / 2)) * (H / 2)
 
-      // VP positions: project far points along world X and Z axes, use x coordinate
-      const vpAx = ((new THREE.Vector3(1000, 0, 0).project(camera)).x + 1) / 2 * W
-      const vpBx = ((new THREE.Vector3(0, 0, -1000).project(camera)).x + 1) / 2 * W
-      const [vp_lx, vp_rx] = vpAx < vpBx ? [vpAx, vpBx] : [vpBx, vpAx]
+      // VP x positions: analytical from camera azimuth (correct for any zoom/tilt)
+      const phi   = Math.atan2(camera.position.x, camera.position.z)
+      const cos   = Math.cos(phi), sin = Math.sin(phi)
+      const f_y   = H / 2 / Math.tan(vFOV / 2)
+      const vp_rx = Math.abs(cos) > 0.01 ? W / 2 + f_y * (sin / cos) : sin > 0 ? 9e4 : -9e4
+      const vp_lx = Math.abs(sin) > 0.01 ? W / 2 - f_y * (cos / sin) : cos > 0 ? -9e4 : 9e4
 
       // ── horizon ──────────────────────────────────────────────────
       ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha = 0.5
