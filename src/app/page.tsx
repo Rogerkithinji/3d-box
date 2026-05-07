@@ -20,6 +20,7 @@ export default function Home() {
   const [showContours, setShowContours] = useState(true)
   const [vertPos,      setVertPos]      = useState(0)
   const [guides,       setGuides]       = useState(true)
+  const [resetCount,   setResetCount]   = useState(0)
 
   const shapeDef = shapeId !== "cube" ? getParametricShape(shapeId) : null
   const params   = shapeId === "cube"
@@ -44,6 +45,7 @@ export default function Home() {
           verticalPosition={vertPos}
           showGuides={guides}
           showContours={showContours}
+          resetCount={resetCount}
         />
       </div>
 
@@ -147,6 +149,14 @@ export default function Home() {
             SHOW GUIDES
           </Label>
         </div>
+
+        <button
+          onClick={() => setResetCount(c => c + 1)}
+          className="font-mono text-xs px-3 py-1.5 border w-full transition-colors"
+          style={{ borderColor: `${INK}44`, color: `${INK}99` }}
+        >
+          RESET VIEW
+        </button>
 
         <div className="mt-auto font-mono text-xs leading-relaxed" style={{ color: `${INK}44` }}>
           <p>Drag to orbit.</p>

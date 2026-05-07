@@ -12,6 +12,7 @@ interface Props {
   verticalPosition: number
   showGuides:       boolean
   showContours:     boolean
+  resetCount:       number
 }
 
 const INK       = "#5B5BD6"
@@ -20,7 +21,7 @@ const HALF      = 0.55
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, showGuides, showContours,
+  verticalPosition, showGuides, showContours, resetCount,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -234,6 +235,15 @@ export function ThreeCube({
       threeRef.current = null
     }
   }, [drawOverlay])
+
+  // ── Reset camera to default position ─────────────────────────────
+  useEffect(() => {
+    const three = threeRef.current
+    if (!three || resetCount === 0) return
+    three.camera.position.set(0, 0, 5)
+    three.controls.target.set(0, 0, 0)
+    three.controls.update()
+  }, [resetCount])
 
   // ── Rebuild scene geometry on prop changes ────────────────────────
   useEffect(() => {
