@@ -5,15 +5,30 @@ import { ThreeCube } from "@/components/three-cube"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import {
+  ALL_SHAPE_IDS, SHAPE_LABELS, getParametricShape,
+  type ShapeId, type ShapeParams,
+} from "@/lib/shapes"
 
 const INK = "#5B5BD6"
 
 export default function Home() {
-  const [rotDeg,  setRotDeg]  = useState(35)
-  const [vertPos, setVertPos] = useState(0)
-  const [guides,  setGuides]  = useState(true)
+  const [shapeId,     setShapeId]     = useState<ShapeId>("cube")
+  const [shapeParams, setShapeParams] = useState<ShapeParams>({})
+  const [uRings,      setURings]      = useState(6)
+  const [vLines,      setVLines]      = useState(16)
+  const [rotDeg,      setRotDeg]      = useState(35)
+  const [vertPos,     setVertPos]     = useState(0)
+  const [guides,      setGuides]      = useState(true)
 
   const rotation = (rotDeg / 90) * (Math.PI / 2)
+  const shapeDef = shapeId !== "cube" ? getParametricShape(shapeId) : null
+  const params   = shapeDef ? { ...shapeDef.defaultParams, ...shapeParams } : {}
+
+  const handleShapeChange = (id: ShapeId) => {
+    setShapeId(id)
+    setShapeParams({})
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "#eef0f7" }}>
@@ -21,6 +36,10 @@ export default function Home() {
       {/* Canvas */}
       <div className="flex-1 min-w-0">
         <ThreeCube
+          shapeId={shapeId}
+          shapeParams={params}
+          uRings={uRings}
+          vLines={vLines}
           rotation={rotation}
           verticalPosition={vertPos}
           showGuides={guides}
@@ -29,13 +48,37 @@ export default function Home() {
 
       {/* Controls */}
       <aside
-        className="w-60 flex-none flex flex-col gap-7 p-6 border-l"
+        className="w-60 flex-none flex flex-col gap-6 p-6 border-l overflow-y-auto"
         style={{ borderColor: `${INK}22` }}
       >
         <p className="font-mono text-xs tracking-widest" style={{ color: INK }}>
           [ CONTROLS ]
         </p>
 
+        {/* Shape selector */}
+        <div className="flex flex-col gap-2">
+          <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+            SHAPE
+          </Label>
+          <div className="flex flex-wrap gap-1">
+            {ALL_SHAPE_IDS.map(id => (
+              <button
+                key={id}
+                onClick={() => handleShapeChange(id)}
+                className="font-mono text-xs px-2 py-1 border transition-colors"
+                style={{
+                  borderColor: `${INK}44`,
+                  background: shapeId === id ? INK : "transparent",
+                  color: shapeId === id ? "#fff" : `${INK}99`,
+                }}
+              >
+                {SHAPE_LABELS[id]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Common controls */}
         <div className="flex flex-col gap-3">
           <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
             VERTICAL POSITION
@@ -63,6 +106,60 @@ export default function Home() {
             {rotDeg}°
           </p>
         </div>
+
+        {/* Shape-specific params */}
+        {shapeDef && shapeDef.controls.map(ctrl => (
+          <div key={ctrl.key} className="flex flex-col gap-3">
+            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+              {ctrl.label}
+            </Label>
+            <Slider
+              min={Math.round(ctrl.min * 100)}
+              max={Math.round(ctrl.max * 100)}
+              step={1}
+              value={Math.round((params[ctrl.key] ?? ctrl.min) * 100)}
+              onValueChange={(v) =>
+                setShapeParams(prev => ({ ...prev, [ctrl.key]: (v as number) / 100 }))
+              }
+            />
+            <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
+              {(params[ctrl.key] ?? ctrl.min).toFixed(2)}
+            </p>
+          </div>
+        ))}
+
+        {/* Contour density controls for parametric shapes */}
+        {shapeId !== "cube" && (
+          <>
+            <div className="flex flex-col gap-3">
+              <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+                U RINGS
+              </Label>
+              <Slider
+                min={2} max={16} step={1}
+                value={uRings}
+                onValueChange={(v) => setURings(v as number)}
+              />
+              <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
+                {uRings}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
+                V LINES
+              </Label>
+              <Slider
+                min={4} max={32} step={1}
+                value={vLines}
+                onValueChange={(v) => setVLines(v as number)}
+              />
+              <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
+                {vLines}
+              </p>
+            </div>
+          </>
+        )}
 
         <div className="flex items-center gap-3">
           <Switch checked={guides} onCheckedChange={setGuides} />

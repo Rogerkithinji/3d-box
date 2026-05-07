@@ -2,32 +2,41 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import * as THREE from "three"
+import { getParametricShape, SHAPE_LABELS, type ShapeId, type ShapeParams } from "@/lib/shapes"
 
 interface Props {
-  rotation: number
+  shapeId:          ShapeId
+  shapeParams:      ShapeParams
+  uRings:           number
+  vLines:           number
+  rotation:         number
   verticalPosition: number
-  showGuides: boolean
+  showGuides:       boolean
 }
 
 const INK       = "#5B5BD6"
 const INK_THREE = new THREE.Color(INK)
 const HALF      = 0.55
 
-export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
+export function ThreeCube({
+  shapeId, shapeParams, uRings, vLines,
+  rotation, verticalPosition, showGuides,
+}: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
 
   const threeRef = useRef<{
-    renderer:  THREE.WebGLRenderer
-    scene:     THREE.Scene
-    camera:    THREE.PerspectiveCamera
-    group:     THREE.Group
+    renderer:   THREE.WebGLRenderer
+    scene:      THREE.Scene
+    camera:     THREE.PerspectiveCamera
+    cubeGroup:  THREE.Group
+    shapeGroup: THREE.Group
   } | null>(null)
 
-  // Store latest render fn so the resize observer always calls the current one
-  const renderRef = useRef<() => void>(() => {})
+  const renderRef  = useRef<() => void>(() => {})
+  const shapeGeoRef = useRef<THREE.BufferGeometry | null>(null)
 
-  // ── Init Three.js (runs once) ───────────────────────────────────
+  // ── Init Three.js (runs once) ─────────────────────────────────────
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
@@ -48,54 +57,51 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
 
     const scene = new THREE.Scene()
 
-    // Cube: depth mask + ghost edges + solid edges
+    // ── Cube: depth mask + front shade + ghost + solid ────────────
     const geo   = new THREE.BoxGeometry(HALF * 2, HALF * 2, HALF * 2)
     const edges = new THREE.EdgesGeometry(geo)
 
-    // Depth mask — writes depth for all front faces, invisible
     const depthMesh = new THREE.Mesh(
       geo,
       new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }),
     )
     depthMesh.renderOrder = 0
 
-    // Front face shade — PlaneGeometry sitting exactly at z=+HALF (the front face)
     const frontShade = new THREE.Mesh(
       new THREE.PlaneGeometry(HALF * 2, HALF * 2),
       new THREE.MeshBasicMaterial({
         color: new THREE.Color("#c8d5ff"),
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.FrontSide,
-        depthWrite: false,
+        transparent: true, opacity: 0.3,
+        side: THREE.FrontSide, depthWrite: false,
       }),
     )
     frontShade.position.z = HALF
     frontShade.renderOrder = 1
 
-    // Ghost — all edges faint, ignores depth so back edges show through
-    const ghost = new THREE.LineSegments(
+    const cubeGhost = new THREE.LineSegments(
       edges,
       new THREE.LineBasicMaterial({
         color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false,
       }),
     )
-    ghost.renderOrder = 2
+    cubeGhost.renderOrder = 2
 
-    // Solid — depth-tested, only front edges draw over the ghost
-    const solid = new THREE.LineSegments(
+    const cubeSolid = new THREE.LineSegments(
       edges,
       new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
     )
-    solid.renderOrder = 3
+    cubeSolid.renderOrder = 3
 
-    const group = new THREE.Group()
-    group.add(depthMesh, frontShade, ghost, solid)
-    scene.add(group)
+    const cubeGroup = new THREE.Group()
+    cubeGroup.add(depthMesh, frontShade, cubeGhost, cubeSolid)
+    scene.add(cubeGroup)
 
-    threeRef.current = { renderer, scene, camera, group }
+    // ── Parametric shape placeholder ──────────────────────────────
+    const shapeGroup = new THREE.Group()
+    scene.add(shapeGroup)
 
-    // Resize — calls whatever renderRef.current is at that moment
+    threeRef.current = { renderer, scene, camera, cubeGroup, shapeGroup }
+
     const onResize = () => {
       const w = wrap.clientWidth, h = wrap.clientHeight
       renderer.setSize(w, h)
@@ -114,9 +120,9 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
     }
   }, [])
 
-  // ── 2D overlay: horizon, VPs, construction lines, labels ────────
+  // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
-    (rot: number, vertPos: number, guides: boolean) => {
+    (rot: number, vertPos: number, guides: boolean, sid: ShapeId) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -134,30 +140,27 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
       const cos = Math.cos(rot)
       const sin = Math.sin(rot)
 
-      // Focal lengths in pixels from camera FOV
       const vFOV = (camera.fov * Math.PI) / 180
       const f_y  = H / 2 / Math.tan(vFOV / 2)
       const f_x  = f_y
 
-      const hy = H / 2 // horizon always at screen centre
+      const hy = H / 2
 
-      // Project world → screen (camera at z=5)
       const toScreen = (wx: number, wy: number, wz: number): [number, number] => {
         const d = 5 - wz
         return [W / 2 + (wx / d) * f_x, H / 2 - (wy / d) * f_y]
       }
 
-      // VP positions (same formula as the canvas approach)
       const vp_rx = Math.abs(cos) > 0.01 ? W / 2 + f_x * (sin / cos) : sin > 0 ? 9e4 : -9e4
       const vp_lx = Math.abs(sin) > 0.01 ? W / 2 - f_x * (cos / sin) : cos > 0 ? -9e4 : 9e4
 
-      // ── horizon ─────────────────────────────────────────────────
+      // ── horizon ──────────────────────────────────────────────────
       ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha = 0.5
       ctx.setLineDash([6, 6])
       ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(W, hy); ctx.stroke()
       ctx.setLineDash([]); ctx.globalAlpha = 1
 
-      // ── VP markers ──────────────────────────────────────────────
+      // ── VP markers ───────────────────────────────────────────────
       const drawVP = (vpx: number, label: string) => {
         if (vpx > 0 && vpx < W) {
           ctx.strokeStyle = INK; ctx.lineWidth = 1.5
@@ -178,8 +181,8 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
       drawVP(vp_lx, "VP_L")
       drawVP(vp_rx, "VP_R")
 
-      // ── construction lines ───────────────────────────────────────
-      if (guides) {
+      // ── construction lines (cube only) ───────────────────────────
+      if (guides && sid === "cube") {
         const screenCorners = (
           [
             [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
@@ -216,7 +219,8 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
       // ── labels ───────────────────────────────────────────────────
       ctx.fillStyle = INK; ctx.font = "10px monospace"; ctx.globalAlpha = 0.7
       ctx.fillText("FIG_001", 36, 24)
-      ctx.fillText("[ CUBE ]", W / 2 - 24, 24)
+      const shapeLabel = `[ ${SHAPE_LABELS[sid]} ]`
+      ctx.fillText(shapeLabel, W / 2 - ctx.measureText(shapeLabel).width / 2, 24)
       ctx.fillText("[ 2-PT PERSPECTIVE ]", W - 174, 24)
       const posLabel =
         vertPos > 0.06 ? "ABOVE EYE LEVEL"
@@ -228,23 +232,90 @@ export function ThreeCube({ rotation, verticalPosition, showGuides }: Props) {
     [],
   )
 
-  // ── Update scene + overlay on every prop change ──────────────────
+  // ── Update scene + overlay on every prop change ───────────────────
   useEffect(() => {
     const three = threeRef.current
     if (!three) return
-    const { renderer, scene, camera, group } = three
+    const { renderer, scene, camera, cubeGroup, shapeGroup } = three
 
-    group.rotation.y = -rotation
-    group.position.y  = verticalPosition
+    if (shapeId === "cube") {
+      cubeGroup.visible  = true
+      shapeGroup.visible = false
+      cubeGroup.rotation.y = -rotation
+      cubeGroup.position.y  = verticalPosition
+    } else {
+      cubeGroup.visible  = false
+      shapeGroup.visible = true
+
+      const shapeDef = getParametricShape(shapeId)
+      if (shapeDef) {
+        const uSamples = uRings + 2
+        const vSamples = vLines
+
+        // Sample surface
+        const grid: [number, number, number][][] = []
+        for (let ui = 0; ui < uSamples; ui++) {
+          const row: [number, number, number][] = []
+          for (let vi = 0; vi < vSamples; vi++) {
+            row.push(shapeDef.surface(ui / (uSamples - 1), vi / vSamples, shapeParams))
+          }
+          grid.push(row)
+        }
+
+        // Build line segment pairs: u-rings (horizontal) + v-lines (vertical)
+        const positions: number[] = []
+        for (let ui = 1; ui < uSamples - 1; ui++) {
+          for (let vi = 0; vi < vSamples; vi++) {
+            const [x1, y1, z1] = grid[ui][vi]
+            const [x2, y2, z2] = grid[ui][(vi + 1) % vSamples]
+            positions.push(x1, y1, z1, x2, y2, z2)
+          }
+        }
+        for (let vi = 0; vi < vSamples; vi++) {
+          for (let ui = 0; ui < uSamples - 1; ui++) {
+            const [x1, y1, z1] = grid[ui][vi]
+            const [x2, y2, z2] = grid[ui + 1][vi]
+            positions.push(x1, y1, z1, x2, y2, z2)
+          }
+        }
+
+        // Swap in new geometry
+        if (shapeGeoRef.current) shapeGeoRef.current.dispose()
+        shapeGroup.clear()
+
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
+        shapeGeoRef.current = geo
+
+        const ghost = new THREE.LineSegments(
+          geo,
+          new THREE.LineBasicMaterial({
+            color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false,
+          }),
+        )
+        ghost.renderOrder = 2
+
+        const solid = new THREE.LineSegments(
+          geo,
+          new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }),
+        )
+        solid.renderOrder = 3
+
+        shapeGroup.add(ghost, solid)
+      }
+
+      shapeGroup.rotation.y = -rotation
+      shapeGroup.position.y  = verticalPosition
+    }
 
     const run = () => {
       renderer.render(scene, camera)
-      drawOverlay(rotation, verticalPosition, showGuides)
+      drawOverlay(rotation, verticalPosition, showGuides, shapeId)
     }
 
     renderRef.current = run
     run()
-  }, [rotation, verticalPosition, showGuides, drawOverlay])
+  }, [shapeId, shapeParams, uRings, vLines, rotation, verticalPosition, showGuides, drawOverlay])
 
   return (
     <div
