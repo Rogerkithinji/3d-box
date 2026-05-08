@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
-import { SHAPE_LABELS, type ShapeId, type ShapeParams } from "@/lib/shapes"
+import { SHAPE_LABELS, getParametricShape, type ShapeId, type ShapeParams } from "@/lib/shapes"
 
 interface Props {
   shapeId:          ShapeId
@@ -41,6 +41,8 @@ export function ThreeCube({
     tubeFrameNormals:   THREE.Vector3[]
     tubeFrameBinormals: THREE.Vector3[]
     tubeFramePoints:    THREE.Vector3[]
+    latheSilhouetteGeo: THREE.BufferGeometry | null
+    latheProfile:       { r: number; y: number }[]
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
@@ -194,6 +196,7 @@ export function ThreeCube({
       cylSilhouetteGeo: null, cylRadius: 0.5, cylHeight: 1.5,
       tubeSilhouetteGeo: null, tubeRadius: 0.15,
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
+      latheSilhouetteGeo: null, latheProfile: [],
     }
 
     // Continuous animation loop — OrbitControls needs this to interpolate damping
@@ -252,6 +255,22 @@ export function ThreeCube({
         tubeSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
       }
 
+      // Recompute lathe (surface of revolution) silhouette from camera azimuth
+      if (three.latheSilhouetteGeo && three.latheProfile.length > 0) {
+        const phi     = Math.atan2(camera.position.x, camera.position.z)
+        const profile = three.latheProfile
+        const pos: number[] = []
+        for (const a of [phi, Math.PI + phi]) {
+          const cx = Math.cos(a), cz = Math.sin(a)
+          for (let i = 0; i < profile.length - 1; i++) {
+            const { r: r1, y: y1 } = profile[i]
+            const { r: r2, y: y2 } = profile[i + 1]
+            pos.push(r1 * cx, y1, r1 * cz, r2 * cx, y2, r2 * cz)
+          }
+        }
+        three.latheSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+      }
+
       renderer.render(scene, camera)
 
       const { verticalPosition, showGuides, shapeId, shapeParams } = liveRef.current
@@ -308,10 +327,12 @@ export function ThreeCube({
     }
 
     if (shapeId === "cube") {
-      shapeGroup.visible     = false
-      three.cylSilhouetteGeo = null
+      shapeGroup.visible      = false
+      three.cylSilhouetteGeo  = null
       three.tubeSilhouetteGeo = null
-      three.tubeFramePoints  = []
+      three.tubeFramePoints   = []
+      three.latheSilhouetteGeo = null
+      three.latheProfile      = []
 
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
@@ -347,9 +368,11 @@ export function ThreeCube({
       cubeGroup.position.y = verticalPosition
 
     } else if (shapeId === "tube") {
-      cubeGroup.visible      = false
-      shapeGroup.visible     = true
-      three.cylSilhouetteGeo = null
+      cubeGroup.visible        = false
+      shapeGroup.visible       = true
+      three.cylSilhouetteGeo   = null
+      three.latheSilhouetteGeo = null
+      three.latheProfile       = []
 
       const radius = shapeParams.radius ?? 0.15
       const length = shapeParams.length ?? 2.0
@@ -450,11 +473,13 @@ export function ThreeCube({
 
       three.tubeSilhouetteGeo = silhouetteGeo
 
-    } else {
-      cubeGroup.visible  = false
-      shapeGroup.visible = true
-      three.tubeSilhouetteGeo = null
-      three.tubeFramePoints   = []
+    } else if (shapeId === "cylinder") {
+      cubeGroup.visible        = false
+      shapeGroup.visible       = true
+      three.tubeSilhouetteGeo  = null
+      three.tubeFramePoints    = []
+      three.latheSilhouetteGeo = null
+      three.latheProfile       = []
 
       const radius = shapeParams.radius ?? 0.5
       const height = shapeParams.height ?? 1.5
@@ -531,6 +556,97 @@ export function ThreeCube({
       three.cylSilhouetteGeo = silhouetteGeo
       three.cylRadius        = radius
       three.cylHeight        = height
+
+    } else {
+      // Capsule, cone, egg — generic surface-of-revolution renderer
+      cubeGroup.visible        = false
+      shapeGroup.visible       = true
+      three.cylSilhouetteGeo   = null
+      three.tubeSilhouetteGeo  = null
+      three.tubeFramePoints    = []
+
+      const shapeDef = getParametricShape(shapeId)
+      if (!shapeDef) return
+
+      const USAMPLES = 64
+      const RSEGS    = 64
+
+      // Sample radial profile: surface(u, 0, params) → [r, y, 0]
+      const profile: { r: number; y: number }[] = []
+      for (let i = 0; i <= USAMPLES; i++) {
+        const u = i / USAMPLES
+        const [x, y] = shapeDef.surface(u, 0, shapeParams)
+        profile.push({ r: Math.max(0, x), y })
+      }
+
+      // Depth mask via LatheGeometry
+      const lathePoints = profile.map(({ r, y }) => new THREE.Vector2(r, y))
+      const latheGeo    = new THREE.LatheGeometry(lathePoints, RSEGS)
+      const depthMesh   = new THREE.Mesh(latheGeo,
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }))
+      depthMesh.renderOrder = 0
+      shapeGroup.add(depthMesh)
+
+      // Flat cap meshes wherever the profile end is open (r > 0)
+      const capMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide })
+      const r0 = profile[0].r,          y0 = profile[0].y
+      const rN = profile[USAMPLES].r,   yN = profile[USAMPLES].y
+      if (r0 > 0.001) {
+        const cap = new THREE.Mesh(new THREE.CircleGeometry(r0, RSEGS), capMat)
+        cap.rotation.x = Math.PI / 2; cap.position.y = y0; cap.renderOrder = 0
+        shapeGroup.add(cap)
+      }
+      if (rN > 0.001) {
+        const cap = new THREE.Mesh(new THREE.CircleGeometry(rN, RSEGS), capMat)
+        cap.rotation.x = -Math.PI / 2; cap.position.y = yN; cap.renderOrder = 0
+        shapeGroup.add(cap)
+      }
+
+      // Ring geometry — end rings + contour rings
+      const ringPos: number[] = []
+      const addRing = (u: number) => {
+        const [x, y] = shapeDef.surface(Math.min(u, 1), 0, shapeParams)
+        const r = Math.max(0, x)
+        if (r < 0.001) return
+        for (let i = 0; i < RSEGS; i++) {
+          const a1 = 2 * Math.PI * i / RSEGS
+          const a2 = 2 * Math.PI * (i + 1) / RSEGS
+          ringPos.push(r * Math.cos(a1), y, r * Math.sin(a1), r * Math.cos(a2), y, r * Math.sin(a2))
+        }
+      }
+      if (r0 > 0.001) addRing(0)
+      if (rN > 0.001) addRing(1)
+      if (showContours) {
+        for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1))
+      }
+      const ringGeo = new THREE.BufferGeometry()
+      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
+
+      // Silhouette placeholder — 2 sides × USAMPLES segments × 2 pts × 3 floats
+      const silhouetteGeo = new THREE.BufferGeometry()
+      silhouetteGeo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(new Float32Array(2 * USAMPLES * 2 * 3), 3),
+      )
+
+      const ringGhost = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      ringGhost.renderOrder = 2
+      const ringSolid = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      ringSolid.renderOrder = 3
+      const silGhost = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      silGhost.renderOrder = 2
+      const silSolid = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      silSolid.renderOrder = 3
+
+      shapeGroup.add(ringGhost, ringSolid, silGhost, silSolid)
+      shapeGroup.position.y = verticalPosition
+
+      three.latheSilhouetteGeo = silhouetteGeo
+      three.latheProfile        = profile
     }
   }, [shapeId, shapeParams, uRings, verticalPosition, showGuides, showContours])
 

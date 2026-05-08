@@ -26,7 +26,7 @@ export default function Home() {
   const shapeDef = shapeId !== "cube" && shapeId !== "tube" ? getParametricShape(shapeId) : null
   const params   = shapeId === "cube" ? { ...CUBE_DEFAULT_PARAMS, ...shapeParams }
                  : shapeId === "tube" ? { ...TUBE_DEFAULT_PARAMS, ...shapeParams }
-                 : shapeDef ? { ...shapeDef.defaultParams, ...shapeParams } : {}
+                 : shapeDef        ? { ...shapeDef.defaultParams, ...shapeParams } : {}
   const controls = shapeId === "cube" ? CUBE_CONTROLS
                  : shapeId === "tube" ? TUBE_CONTROLS
                  : (shapeDef?.controls ?? [])
@@ -67,7 +67,7 @@ export default function Home() {
             SHAPE
           </Label>
           <div className="flex flex-wrap gap-1">
-            {(["cube", "cylinder", "tube"] as ShapeId[]).map(id => (
+            {(["cube", "cylinder", "capsule", "cone", "egg", "tube"] as ShapeId[]).map(id => (
               <button
                 key={id}
                 onClick={() => handleShapeChange(id)}
