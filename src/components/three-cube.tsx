@@ -27,15 +27,20 @@ export function ThreeCube({
   const overlayRef = useRef<HTMLCanvasElement>(null)
 
   const threeRef = useRef<{
-    renderer:         THREE.WebGLRenderer
-    scene:            THREE.Scene
-    camera:           THREE.PerspectiveCamera
-    controls:         OrbitControls
-    cubeGroup:        THREE.Group
-    shapeGroup:       THREE.Group
-    cylSilhouetteGeo: THREE.BufferGeometry | null
-    cylRadius:        number
-    cylHeight:        number
+    renderer:           THREE.WebGLRenderer
+    scene:              THREE.Scene
+    camera:             THREE.PerspectiveCamera
+    controls:           OrbitControls
+    cubeGroup:          THREE.Group
+    shapeGroup:         THREE.Group
+    cylSilhouetteGeo:   THREE.BufferGeometry | null
+    cylRadius:          number
+    cylHeight:          number
+    tubeSilhouetteGeo:  THREE.BufferGeometry | null
+    tubeRadius:         number
+    tubeFrameNormals:   THREE.Vector3[]
+    tubeFrameBinormals: THREE.Vector3[]
+    tubeFramePoints:    THREE.Vector3[]
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
@@ -187,6 +192,8 @@ export function ThreeCube({
       renderer, scene, camera, controls,
       cubeGroup, shapeGroup,
       cylSilhouetteGeo: null, cylRadius: 0.5, cylHeight: 1.5,
+      tubeSilhouetteGeo: null, tubeRadius: 0.15,
+      tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
     }
 
     // Continuous animation loop — OrbitControls needs this to interpolate damping
@@ -214,6 +221,35 @@ export function ThreeCube({
           }
         }
         cylSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+      }
+
+      // Recompute tube silhouette from Frenet frames each frame
+      if (three.tubeSilhouetteGeo && three.tubeFramePoints.length > 0) {
+        const { tubeSilhouetteGeo, tubeFrameNormals, tubeFrameBinormals, tubeFramePoints, tubeRadius } = three
+        const TSEGS = tubeFramePoints.length - 1
+        const camDir = new THREE.Vector3()
+          .subVectors(camera.position, controls.target)
+          .normalize()
+        const pos: number[] = []
+        for (let side = 0; side < 2; side++) {
+          for (let i = 0; i < TSEGS; i++) {
+            for (const ti of [i, i + 1]) {
+              const N = tubeFrameNormals[ti]
+              const B = tubeFrameBinormals[ti]
+              const P = tubeFramePoints[ti]
+              const dn = N.dot(camDir)
+              const db = B.dot(camDir)
+              const a  = Math.atan2(-dn, db) + (side === 1 ? Math.PI : 0)
+              const ca = Math.cos(a), sa = Math.sin(a)
+              pos.push(
+                P.x + ca * tubeRadius * N.x + sa * tubeRadius * B.x,
+                P.y + ca * tubeRadius * N.y + sa * tubeRadius * B.y,
+                P.z + ca * tubeRadius * N.z + sa * tubeRadius * B.z,
+              )
+            }
+          }
+        }
+        tubeSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
       }
 
       renderer.render(scene, camera)
@@ -272,8 +308,10 @@ export function ThreeCube({
     }
 
     if (shapeId === "cube") {
-      shapeGroup.visible   = false
+      shapeGroup.visible     = false
       three.cylSilhouetteGeo = null
+      three.tubeSilhouetteGeo = null
+      three.tubeFramePoints  = []
 
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
@@ -308,9 +346,115 @@ export function ThreeCube({
       cubeGroup.visible    = true
       cubeGroup.position.y = verticalPosition
 
+    } else if (shapeId === "tube") {
+      cubeGroup.visible      = false
+      shapeGroup.visible     = true
+      three.cylSilhouetteGeo = null
+
+      const radius = shapeParams.radius ?? 0.15
+      const length = shapeParams.length ?? 2.0
+      const bend   = shapeParams.bend   ?? 0.7
+
+      const TSEGS = 32
+      const RSEGS = 48
+
+      const path = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(0, -length / 2, 0),
+        new THREE.Vector3(bend, 0, 0),
+        new THREE.Vector3(0,  length / 2, 0),
+      )
+
+      // Precompute Frenet frames — stored for per-frame silhouette recomputation
+      const frenetFrames = path.computeFrenetFrames(TSEGS, false)
+      const framePoints: THREE.Vector3[] = []
+      for (let i = 0; i <= TSEGS; i++) framePoints.push(path.getPointAt(i / TSEGS))
+      three.tubeFrameNormals   = frenetFrames.normals
+      three.tubeFrameBinormals = frenetFrames.binormals
+      three.tubeFramePoints    = framePoints
+      three.tubeRadius         = radius
+
+      // Depth mask (open tube body)
+      const tubeGeo = new THREE.TubeGeometry(path, TSEGS, radius, RSEGS, false)
+      const depthMesh = new THREE.Mesh(tubeGeo,
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }))
+      depthMesh.renderOrder = 0
+
+      // End cap depth masks oriented to the path tangent at each end
+      const capGeo = new THREE.CircleGeometry(radius, RSEGS)
+      const capMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide })
+      const cap0 = new THREE.Mesh(capGeo, capMat)
+      cap0.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), frenetFrames.tangents[0].clone().negate(),
+      )
+      cap0.position.copy(framePoints[0])
+      cap0.renderOrder = 0
+      const cap1 = new THREE.Mesh(capGeo, capMat)
+      cap1.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), frenetFrames.tangents[TSEGS].clone(),
+      )
+      cap1.position.copy(framePoints[TSEGS])
+      cap1.renderOrder = 0
+
+      // Ring geometry — end rings + optional contour rings along the path
+      const ringPos: number[] = []
+      const addRing = (t: number) => {
+        const fi  = Math.min(Math.floor(t * TSEGS), TSEGS - 1)
+        const ff  = t * TSEGS - fi
+        const fi2 = Math.min(fi + 1, TSEGS)
+        const P   = path.getPointAt(Math.min(t, 1))
+        const N   = frenetFrames.normals[fi].clone().lerp(frenetFrames.normals[fi2], ff).normalize()
+        const B   = frenetFrames.binormals[fi].clone().lerp(frenetFrames.binormals[fi2], ff).normalize()
+        for (let i = 0; i < RSEGS; i++) {
+          const a1 = 2 * Math.PI * i / RSEGS
+          const a2 = 2 * Math.PI * (i + 1) / RSEGS
+          ringPos.push(
+            P.x + radius * Math.cos(a1) * N.x + radius * Math.sin(a1) * B.x,
+            P.y + radius * Math.cos(a1) * N.y + radius * Math.sin(a1) * B.y,
+            P.z + radius * Math.cos(a1) * N.z + radius * Math.sin(a1) * B.z,
+            P.x + radius * Math.cos(a2) * N.x + radius * Math.sin(a2) * B.x,
+            P.y + radius * Math.cos(a2) * N.y + radius * Math.sin(a2) * B.y,
+            P.z + radius * Math.cos(a2) * N.z + radius * Math.sin(a2) * B.z,
+          )
+        }
+      }
+      addRing(0); addRing(1)
+      if (showContours) {
+        for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1))
+      }
+      const ringGeo = new THREE.BufferGeometry()
+      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
+
+      // Silhouette placeholder (2 sides × TSEGS segs × 2 pts × 3 floats)
+      const silhouetteGeo = new THREE.BufferGeometry()
+      silhouetteGeo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(new Float32Array(2 * TSEGS * 2 * 3), 3),
+      )
+
+      const ringGhost = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      ringGhost.renderOrder = 2
+      const ringSolid = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      ringSolid.renderOrder = 3
+
+      const silGhost = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      silGhost.renderOrder = 2
+      const silSolid = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      silSolid.renderOrder = 3
+
+      shapeGroup.add(depthMesh, cap0, cap1, ringGhost, ringSolid, silGhost, silSolid)
+      shapeGroup.position.y = verticalPosition
+
+      three.tubeSilhouetteGeo = silhouetteGeo
+
     } else {
       cubeGroup.visible  = false
       shapeGroup.visible = true
+      three.tubeSilhouetteGeo = null
+      three.tubeFramePoints   = []
 
       const radius = shapeParams.radius ?? 0.5
       const height = shapeParams.height ?? 1.5
