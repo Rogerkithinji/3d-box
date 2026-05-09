@@ -41,8 +41,10 @@ export function ThreeCube({
     tubeFrameNormals:   THREE.Vector3[]
     tubeFrameBinormals: THREE.Vector3[]
     tubeFramePoints:    THREE.Vector3[]
-    latheSilhouetteGeo: THREE.BufferGeometry | null
-    latheProfile:       { r: number; y: number }[]
+    latheSilhouetteGeo:  THREE.BufferGeometry | null
+    latheProfile:        { r: number; y: number }[]
+    sphereSilhouetteGeo: THREE.BufferGeometry | null
+    sphereRadius:        number
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
@@ -197,6 +199,7 @@ export function ThreeCube({
       tubeSilhouetteGeo: null, tubeRadius: 0.15,
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
       latheSilhouetteGeo: null, latheProfile: [],
+      sphereSilhouetteGeo: null, sphereRadius: 0.8,
     }
 
     // Continuous animation loop — OrbitControls needs this to interpolate damping
@@ -271,6 +274,35 @@ export function ThreeCube({
         three.latheSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
       }
 
+      // Recompute sphere silhouette — great circle perpendicular to camera direction
+      if (three.sphereSilhouetteGeo) {
+        const { sphereSilhouetteGeo, sphereRadius: r } = three
+        const vertPos = liveRef.current.verticalPosition
+        const SSEGS   = 64
+        const camDir  = new THREE.Vector3()
+          .subVectors(camera.position, new THREE.Vector3(0, vertPos, 0))
+          .normalize()
+        const worldUp = Math.abs(camDir.y) < 0.99
+          ? new THREE.Vector3(0, 1, 0)
+          : new THREE.Vector3(1, 0, 0)
+        const right = new THREE.Vector3().crossVectors(worldUp, camDir).normalize()
+        const up    = new THREE.Vector3().crossVectors(camDir, right)
+        const pos: number[] = []
+        for (let i = 0; i < SSEGS; i++) {
+          const a1 = 2 * Math.PI * i / SSEGS
+          const a2 = 2 * Math.PI * (i + 1) / SSEGS
+          pos.push(
+            r * Math.cos(a1) * right.x + r * Math.sin(a1) * up.x,
+            r * Math.cos(a1) * right.y + r * Math.sin(a1) * up.y,
+            r * Math.cos(a1) * right.z + r * Math.sin(a1) * up.z,
+            r * Math.cos(a2) * right.x + r * Math.sin(a2) * up.x,
+            r * Math.cos(a2) * right.y + r * Math.sin(a2) * up.y,
+            r * Math.cos(a2) * right.z + r * Math.sin(a2) * up.z,
+          )
+        }
+        sphereSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+      }
+
       renderer.render(scene, camera)
 
       const { verticalPosition, showGuides, shapeId, shapeParams } = liveRef.current
@@ -331,8 +363,9 @@ export function ThreeCube({
       three.cylSilhouetteGeo  = null
       three.tubeSilhouetteGeo = null
       three.tubeFramePoints   = []
-      three.latheSilhouetteGeo = null
-      three.latheProfile      = []
+      three.latheSilhouetteGeo  = null
+      three.latheProfile        = []
+      three.sphereSilhouetteGeo = null
 
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
@@ -370,9 +403,10 @@ export function ThreeCube({
     } else if (shapeId === "tube") {
       cubeGroup.visible        = false
       shapeGroup.visible       = true
-      three.cylSilhouetteGeo   = null
-      three.latheSilhouetteGeo = null
-      three.latheProfile       = []
+      three.cylSilhouetteGeo    = null
+      three.latheSilhouetteGeo  = null
+      three.latheProfile        = []
+      three.sphereSilhouetteGeo = null
 
       const radius = shapeParams.radius ?? 0.15
       const length = shapeParams.length ?? 2.0
@@ -476,10 +510,11 @@ export function ThreeCube({
     } else if (shapeId === "cylinder") {
       cubeGroup.visible        = false
       shapeGroup.visible       = true
-      three.tubeSilhouetteGeo  = null
-      three.tubeFramePoints    = []
-      three.latheSilhouetteGeo = null
-      three.latheProfile       = []
+      three.tubeSilhouetteGeo   = null
+      three.tubeFramePoints     = []
+      three.latheSilhouetteGeo  = null
+      three.latheProfile        = []
+      three.sphereSilhouetteGeo = null
 
       const radius = shapeParams.radius ?? 0.5
       const height = shapeParams.height ?? 1.5
@@ -557,13 +592,73 @@ export function ThreeCube({
       three.cylRadius        = radius
       three.cylHeight        = height
 
+    } else if (shapeId === "sphere") {
+      cubeGroup.visible         = false
+      shapeGroup.visible        = true
+      three.cylSilhouetteGeo    = null
+      three.tubeSilhouetteGeo   = null
+      three.tubeFramePoints     = []
+      three.latheSilhouetteGeo  = null
+      three.latheProfile        = []
+
+      const radius = shapeParams.radius ?? 0.8
+      const SEGS   = 64
+
+      const sphereGeo = new THREE.SphereGeometry(radius, SEGS, SEGS)
+      const depthMesh = new THREE.Mesh(sphereGeo,
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }))
+      depthMesh.renderOrder = 0
+
+      // Latitude contour rings
+      const ringPos: number[] = []
+      if (showContours) {
+        for (let i = 1; i <= uRings; i++) {
+          const y = -radius + 2 * radius * i / (uRings + 1)
+          const r = Math.sqrt(Math.max(0, radius * radius - y * y))
+          for (let j = 0; j < SEGS; j++) {
+            const a1 = 2 * Math.PI * j / SEGS
+            const a2 = 2 * Math.PI * (j + 1) / SEGS
+            ringPos.push(r * Math.cos(a1), y, r * Math.sin(a1), r * Math.cos(a2), y, r * Math.sin(a2))
+          }
+        }
+      }
+      const ringGeo = new THREE.BufferGeometry()
+      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
+
+      // Silhouette great circle placeholder — SEGS segments × 2 pts × 3 floats
+      const silhouetteGeo = new THREE.BufferGeometry()
+      silhouetteGeo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(new Float32Array(SEGS * 2 * 3), 3),
+      )
+
+      const ringGhost = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      ringGhost.renderOrder = 2
+      const ringSolid = new THREE.LineSegments(ringGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      ringSolid.renderOrder = 3
+      const silGhost = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
+      silGhost.renderOrder = 2
+      const silSolid = new THREE.LineSegments(silhouetteGeo,
+        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
+      silSolid.renderOrder = 3
+
+      shapeGroup.add(depthMesh, ringGhost, ringSolid, silGhost, silSolid)
+      shapeGroup.position.y = verticalPosition
+
+      three.sphereSilhouetteGeo = silhouetteGeo
+      three.sphereRadius        = radius
+
     } else {
       // Capsule, cone, egg — generic surface-of-revolution renderer
-      cubeGroup.visible        = false
-      shapeGroup.visible       = true
-      three.cylSilhouetteGeo   = null
-      three.tubeSilhouetteGeo  = null
-      three.tubeFramePoints    = []
+      cubeGroup.visible         = false
+      shapeGroup.visible        = true
+      three.cylSilhouetteGeo    = null
+      three.tubeSilhouetteGeo   = null
+      three.tubeFramePoints     = []
+      three.sphereSilhouetteGeo = null
 
       const shapeDef = getParametricShape(shapeId)
       if (!shapeDef) return

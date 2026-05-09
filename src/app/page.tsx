@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import {
   SHAPE_LABELS, getParametricShape,
   CUBE_CONTROLS, CUBE_DEFAULT_PARAMS,
+  SPHERE_CONTROLS, SPHERE_DEFAULT_PARAMS,
   TUBE_CONTROLS, TUBE_DEFAULT_PARAMS,
   type ShapeId, type ShapeParams,
 } from "@/lib/shapes"
@@ -24,11 +25,13 @@ export default function Home() {
   const [resetCount,   setResetCount]   = useState(0)
 
   const shapeDef = shapeId !== "cube" && shapeId !== "tube" ? getParametricShape(shapeId) : null
-  const params   = shapeId === "cube" ? { ...CUBE_DEFAULT_PARAMS, ...shapeParams }
-                 : shapeId === "tube" ? { ...TUBE_DEFAULT_PARAMS, ...shapeParams }
-                 : shapeDef        ? { ...shapeDef.defaultParams, ...shapeParams } : {}
-  const controls = shapeId === "cube" ? CUBE_CONTROLS
-                 : shapeId === "tube" ? TUBE_CONTROLS
+  const params   = shapeId === "cube"    ? { ...CUBE_DEFAULT_PARAMS,   ...shapeParams }
+                 : shapeId === "sphere" ? { ...SPHERE_DEFAULT_PARAMS, ...shapeParams }
+                 : shapeId === "tube"   ? { ...TUBE_DEFAULT_PARAMS,   ...shapeParams }
+                 : shapeDef            ? { ...shapeDef.defaultParams, ...shapeParams } : {}
+  const controls = shapeId === "cube"    ? CUBE_CONTROLS
+                 : shapeId === "sphere" ? SPHERE_CONTROLS
+                 : shapeId === "tube"   ? TUBE_CONTROLS
                  : (shapeDef?.controls ?? [])
 
   const handleShapeChange = (id: ShapeId) => {
@@ -67,7 +70,7 @@ export default function Home() {
             SHAPE
           </Label>
           <div className="flex flex-wrap gap-1">
-            {(["cube", "cylinder", "capsule", "cone", "egg", "tube"] as ShapeId[]).map(id => (
+            {(["cube", "cylinder", "sphere", "capsule", "cone", "egg", "tube"] as ShapeId[]).map(id => (
               <button
                 key={id}
                 onClick={() => handleShapeChange(id)}

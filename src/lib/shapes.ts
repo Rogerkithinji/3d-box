@@ -1,4 +1,4 @@
-export type ShapeId = "cube" | "cylinder" | "capsule" | "cone" | "egg" | "tube"
+export type ShapeId = "cube" | "cylinder" | "sphere" | "capsule" | "cone" | "egg" | "tube"
 
 export interface ControlDef {
   key: string
@@ -23,13 +23,14 @@ export interface ParametricShapeDef {
 export const SHAPE_LABELS: Record<ShapeId, string> = {
   cube:     "CUBE",
   cylinder: "CYL",
+  sphere:   "SPH",
   capsule:  "CAPS",
   cone:     "CONE",
   egg:      "EGG",
   tube:     "TUBE",
 }
 
-export const ALL_SHAPE_IDS: ShapeId[] = ["cube", "cylinder", "capsule", "cone", "egg", "tube"]
+export const ALL_SHAPE_IDS: ShapeId[] = ["cube", "cylinder", "sphere", "capsule", "cone", "egg", "tube"]
 
 export const PARAMETRIC_SHAPES: ParametricShapeDef[] = [
   {
@@ -114,6 +115,12 @@ export const CUBE_DEFAULT_PARAMS: ShapeParams = { width: 1.1, height: 1.1, depth
 export function getParametricShape(id: ShapeId): ParametricShapeDef | undefined {
   return PARAMETRIC_SHAPES.find(s => s.id === id)
 }
+
+export const SPHERE_CONTROLS: ControlDef[] = [
+  { key: "radius", label: "RADIUS", min: 0.2, max: 1.5, step: 0.01 },
+]
+
+export const SPHERE_DEFAULT_PARAMS: ShapeParams = { radius: 0.8 }
 
 export const TUBE_CONTROLS: ControlDef[] = [
   { key: "radius", label: "RADIUS", min: 0.05, max: 0.45, step: 0.01 },
