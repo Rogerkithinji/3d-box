@@ -30,6 +30,16 @@ export const SHAPE_LABELS: Record<ShapeId, string> = {
   tube:     "TUBE",
 }
 
+export const SHAPE_FULL_LABELS: Record<ShapeId, string> = {
+  cube:     "CUBE",
+  cylinder: "CYLINDER",
+  sphere:   "SPHERE",
+  capsule:  "CAPSULE",
+  cone:     "CONE",
+  egg:      "EGG",
+  tube:     "TUBE",
+}
+
 export const ALL_SHAPE_IDS: ShapeId[] = ["cube", "cylinder", "sphere", "capsule", "cone", "egg", "tube"]
 
 export const PARAMETRIC_SHAPES: ParametricShapeDef[] = [

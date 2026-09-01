@@ -3,25 +3,37 @@
 import { useCallback, useEffect, useRef } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
-import { SHAPE_LABELS, getParametricShape, type ShapeId, type ShapeParams } from "@/lib/shapes"
+import { ALL_SHAPE_IDS, SHAPE_FULL_LABELS, getParametricShape, type ShapeId, type ShapeParams } from "@/lib/shapes"
 
 interface Props {
   shapeId:          ShapeId
   shapeParams:      ShapeParams
   uRings:           number
   verticalPosition: number
+  rotationDeg:      { x: number; y: number; z: number }
+  activeAxis:       "x" | "y" | "z" | null
+  showAxes:         boolean
   showGuides:       boolean
   showContours:     boolean
   resetCount:       number
+  zoomAction:       { dir: number; n: number }
 }
 
 const INK       = "#5B5BD6"
 const INK_THREE = new THREE.Color(INK)
+const RED       = "#C4553B"      // sanguine — perspective apparatus (horizon, VPs, guides)
+const RED_FAINT = "rgba(196,85,59,0.16)"
+const ORANGE       = "#C4651C"   // interactive accent (deep) — the axis being rotated right now
+const ORANGE_THREE = new THREE.Color(ORANGE)
 const HALF      = 0.55
+// Default 3/4 view — the cube opens with both faces vanishing to their VPs
+const HOME_CAM: [number, number, number] = [2.3, 1.15, 4.3]
+// RESET VIEW target — face to face with the form, at eye level
+const FACE_CAM: [number, number, number] = [0, 0, 5]
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, showGuides, showContours, resetCount,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -48,12 +60,13 @@ export function ThreeCube({
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, showGuides, shapeId, shapeParams })
-  useEffect(() => { liveRef.current = { verticalPosition, showGuides, shapeId, shapeParams } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
-    (vertPos: number, guides: boolean, sid: ShapeId, hw: number, hh: number, hd: number) => {
+    (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
+     rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -83,39 +96,129 @@ export function ThreeCube({
       const tanPitch = hLen > 0.001 ? forward.y / hLen : (forward.y > 0 ? 1e6 : -1e6)
       const hy = H / 2 + (tanPitch / Math.tan(vFOV / 2)) * (H / 2)
 
-      // VP x positions: analytical from camera azimuth (correct for any zoom/tilt)
-      const phi   = Math.atan2(camera.position.x, camera.position.z)
-      const cos   = Math.cos(phi), sin = Math.sin(phi)
-      const f_y   = H / 2 / Math.tan(vFOV / 2)
-      const vp_rx = Math.abs(cos) > 0.01 ? W / 2 + f_y * (sin / cos) : sin > 0 ? 9e4 : -9e4
-      const vp_lx = Math.abs(sin) > 0.01 ? W / 2 - f_y * (cos / sin) : cos > 0 ? -9e4 : 9e4
+      // VPs: project each of the form's three edge-direction families to its
+      // point at infinity through the live camera. Spinning slides the
+      // horizontal VPs along the horizon; tilting or rolling the form (or the
+      // camera) pulls VPs off the horizon and wakes the third one. An edge
+      // family parallel to the picture plane has no VP at all.
+      const f_y  = H / 2 / Math.tan(vFOV / 2)
+      const D2R  = Math.PI / 180
+      // "YXZ": tilt pivots on the cube's own (spun) X axis and roll on its own
+      // Z axis, so each slider rotates around the axis line drawn on the form
+      const eul  = sid === "cube"
+        ? new THREE.Euler(rotDeg.x * D2R, rotDeg.y * D2R, rotDeg.z * D2R, "YXZ")
+        : new THREE.Euler(0, 0, 0, "YXZ")
+      const invQ = camera.quaternion.clone().invert()
+      const familyVP = (lx: number, ly: number, lz: number): [number, number] | null => {
+        const d = new THREE.Vector3(lx, ly, lz).applyEuler(eul).applyQuaternion(invQ)
+        if (d.z > 0) { d.x = -d.x; d.y = -d.y; d.z = -d.z } // point away from camera
+        if (d.z > -0.05) return null // within ~3° of the picture plane — treat as parallel, no VP
+        return [W / 2 + (d.x / -d.z) * f_y, H / 2 - (d.y / -d.z) * f_y]
+      }
+      const famX = familyVP(1, 0, 0)
+      const famZ = familyVP(0, 0, 1)
+      const famY = familyVP(0, 1, 0)
+      const xKey = famX ? famX[0] : Infinity
+      const zKey = famZ ? famZ[0] : Infinity
+      // With only one horizontal family vanishing (face-on view), that VP is
+      // the classic centre vanishing point of one-point perspective
+      const oneHoriz = (famX === null) !== (famZ === null)
+      const vps: { pt: [number, number] | null; label: string }[] = [
+        { pt: famX, label: oneHoriz ? "VP_C" : xKey <= zKey ? "VP_L" : "VP_R" },
+        { pt: famZ, label: oneHoriz ? "VP_C" : xKey <= zKey ? "VP_R" : "VP_L" },
+        { pt: famY, label: "VP_3" },
+      ]
 
-      // ── horizon ──────────────────────────────────────────────────
-      ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha = 0.5
+      // ── eye level & the form's horizon ───────────────────────────
+      // Eye level is a camera fact and never moves with the form. The
+      // HORIZON drawn for the form is the vanishing line of its own ground
+      // plane (local x-z): it passes through VP_L and VP_R, so it swings
+      // away from eye level as the form tilts or rolls.
+      // Line equation from the plane normal in camera space:
+      //   n.x·(x − W/2) − n.y·(y − H/2) = f_y·n.z
+      const nUp = new THREE.Vector3(0, 1, 0).applyEuler(eul).applyQuaternion(invQ)
+      const yAt = (x: number): number | null =>
+        Math.abs(nUp.y) > 1e-6 ? H / 2 + (nUp.x * (x - W / 2) - f_y * nUp.z) / nUp.y : null
+      const y0 = yAt(0), yW = yAt(W)
+      const horizonTilted =
+        sid === "cube" &&
+        (y0 === null || yW === null || Math.abs(y0 - hy) > 2.5 || Math.abs(yW - hy) > 2.5)
+
+      // eye level — fades back a little when the form horizon departs from it
+      ctx.strokeStyle = RED; ctx.lineWidth = 1; ctx.globalAlpha = horizonTilted ? 0.3 : 0.55
       ctx.setLineDash([6, 6])
       ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(W, hy); ctx.stroke()
       ctx.setLineDash([]); ctx.globalAlpha = 1
+      if (hy > 14 && hy < H - 22) {
+        ctx.fillStyle = RED; ctx.font = "11px monospace"; ctx.globalAlpha = horizonTilted ? 0.5 : 0.8
+        ctx.fillText("EYE LEVEL", 36, hy + 16)
+        ctx.globalAlpha = 1
+      }
+
+      // form horizon — only drawn once it separates from eye level
+      if (horizonTilted) {
+        const pts: [number, number][] = []
+        if (Math.abs(nUp.y) >= Math.abs(nUp.x)) {
+          for (const x of [-40, W + 40]) {
+            const y = yAt(x)
+            if (y !== null) pts.push([x, y])
+          }
+        } else if (Math.abs(nUp.x) > 1e-6) {
+          for (const y of [-40, H + 40]) {
+            pts.push([W / 2 + (f_y * nUp.z + nUp.y * (y - H / 2)) / nUp.x, y])
+          }
+        }
+        if (pts.length === 2) {
+          ctx.strokeStyle = RED; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.7
+          ctx.setLineDash([12, 5])
+          ctx.beginPath()
+          ctx.moveTo(pts[0][0], pts[0][1]); ctx.lineTo(pts[1][0], pts[1][1])
+          ctx.stroke()
+          ctx.setLineDash([]); ctx.globalAlpha = 1
+          const ly = yAt(120)
+          if (ly !== null && ly > 26 && ly < H - 26) {
+            ctx.fillStyle = RED; ctx.font = "11px monospace"; ctx.globalAlpha = 0.85
+            ctx.fillText("HORIZON", 120, ly - 8)
+            ctx.globalAlpha = 1
+          }
+        }
+      }
 
       // ── VP markers ───────────────────────────────────────────────
-      const drawVP = (vpx: number, label: string) => {
-        if (vpx > 0 && vpx < W) {
-          ctx.strokeStyle = INK; ctx.lineWidth = 1.5
+      const drawVP = (pt: [number, number] | null, label: string) => {
+        if (!pt) return
+        const [vx, vy] = pt
+        ctx.font = "11px monospace"
+        if (vx > 0 && vx < W && vy > 0 && vy < H) {
+          ctx.strokeStyle = RED; ctx.lineWidth = 1.5
           ctx.beginPath()
-          ctx.moveTo(vpx - 7, hy); ctx.lineTo(vpx + 7, hy)
-          ctx.moveTo(vpx, hy - 7); ctx.lineTo(vpx, hy + 7)
+          ctx.moveTo(vx - 7, vy); ctx.lineTo(vx + 7, vy)
+          ctx.moveTo(vx, vy - 7); ctx.lineTo(vx, vy + 7)
           ctx.stroke()
-          ctx.fillStyle = INK; ctx.font = "10px monospace"
+          ctx.fillStyle = RED
           const tw = ctx.measureText(label).width
-          ctx.fillText(label, vpx > W / 2 ? vpx + 10 : vpx - 10 - tw, hy - 9)
+          ctx.fillText(label, vx > W / 2 ? vx + 10 : vx - 10 - tw, vy - 9)
         } else {
-          ctx.fillStyle = INK; ctx.font = "10px monospace"; ctx.globalAlpha = 0.6
-          const txt = vpx < 0 ? `← ${label}` : `${label} →`
-          ctx.fillText(txt, vpx < 0 ? 14 : W - 14 - ctx.measureText(txt).width, hy - 9)
+          // off-canvas: park an arrow label where the ray from the horizon
+          // centre toward the VP leaves the canvas
+          const ox = W / 2, oy = hy
+          const dx = vx - ox, dy = vy - oy
+          const tx = dx > 0 ? (W - 20 - ox) / dx : dx < 0 ? (20 - ox) / dx : Infinity
+          const ty = dy > 0 ? (H - 20 - oy) / dy : dy < 0 ? (20 - oy) / dy : Infinity
+          const t  = Math.min(tx, ty)
+          if (!isFinite(t) || t <= 0) return
+          const ex = ox + dx * t, ey = oy + dy * t
+          const arrow = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "→" : "←") : (dy > 0 ? "↓" : "↑")
+          const txt = arrow === "←" ? `← ${label}` : arrow === "→" ? `${label} →` : `${label} ${arrow}`
+          const tw  = ctx.measureText(txt).width
+          ctx.fillStyle = RED; ctx.globalAlpha = 0.7
+          ctx.fillText(txt,
+            Math.max(14, Math.min(W - 14 - tw, ex - tw / 2)),
+            Math.max(22, Math.min(H - 10, ey - 8)))
           ctx.globalAlpha = 1
         }
       }
-      drawVP(vp_lx, "VP_L")
-      drawVP(vp_rx, "VP_R")
+      vps.forEach(v => drawVP(v.pt, v.label))
 
       // ── construction lines (cube only) ───────────────────────────
       if (guides && sid === "cube") {
@@ -123,14 +226,46 @@ export function ThreeCube({
           [-hw, -hh, -hd], [hw, -hh, -hd], [hw,  hh, -hd], [-hw,  hh, -hd],
           [-hw, -hh,  hd], [hw, -hh,  hd], [hw,  hh,  hd], [-hw,  hh,  hd],
         ]
-        const screenCorners = corners.map(([x, y, z]) => toScreen(x, y + vertPos, z))
-        const cap = (v: number) => Math.max(-3000, Math.min(W + 3000, v))
-        ctx.strokeStyle = "rgba(91,91,214,0.15)"; ctx.lineWidth = 0.75; ctx.setLineDash([3, 7])
+        const screenCorners = corners.map(([x, y, z]) => {
+          const p = new THREE.Vector3(x, y, z).applyEuler(eul)
+          return toScreen(p.x, p.y + vertPos, p.z)
+        })
+        ctx.strokeStyle = RED_FAINT; ctx.lineWidth = 0.75; ctx.setLineDash([3, 7])
         screenCorners.forEach(([sx, sy]) => {
-          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cap(vp_lx), hy); ctx.stroke()
-          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cap(vp_rx), hy); ctx.stroke()
+          vps.forEach(v => {
+            if (!v.pt) return
+            const dx = v.pt[0] - sx, dy = v.pt[1] - sy
+            const len = Math.hypot(dx, dy) || 1
+            const L = Math.min(len, 3000)
+            ctx.beginPath()
+            ctx.moveTo(sx, sy)
+            ctx.lineTo(sx + dx / len * L, sy + dy / len * L)
+            ctx.stroke()
+          })
         })
         ctx.setLineDash([])
+      }
+
+      // ── axis letters at the form-axis tips (cube only) ───────────
+      // The axis a slider is currently rotating around lights up in red;
+      // with SHOW AXES off, only that active axis appears while rotating.
+      if (sid === "cube" && (axes || liveAxis)) {
+        const tips: ["x" | "y" | "z", number, number, number][] = [
+          ["x", hw + 0.52, 0, 0],
+          ["y", 0, hh + 0.52, 0],
+          ["z", 0, 0, hd + 0.52],
+        ]
+        tips.forEach(([axis, tx, ty, tz]) => {
+          const active = axis === liveAxis
+          if (!axes && !active) return
+          const p = new THREE.Vector3(tx, ty, tz).applyEuler(eul)
+          const [sx, sy] = toScreen(p.x, p.y + vertPos, p.z)
+          ctx.font = active ? "bold 12px monospace" : "11px monospace"
+          ctx.fillStyle = active ? ORANGE : INK
+          ctx.globalAlpha = active ? 1 : 0.75
+          ctx.fillText(axis.toUpperCase(), sx - 3.5, sy + 4)
+        })
+        ctx.globalAlpha = 1
       }
 
       // ── corner frame ─────────────────────────────────────────────
@@ -145,17 +280,47 @@ export function ThreeCube({
       })
       ctx.globalAlpha = 1
 
-      // ── labels ───────────────────────────────────────────────────
-      ctx.fillStyle = INK; ctx.font = "10px monospace"; ctx.globalAlpha = 0.7
-      ctx.fillText("FIG_001", 36, 24)
-      const shapeLabel = `[ ${SHAPE_LABELS[sid]} ]`
-      ctx.fillText(shapeLabel, W / 2 - ctx.measureText(shapeLabel).width / 2, 24)
-      ctx.fillText("[ 2-PT PERSPECTIVE ]", W - 174, 24)
+      // ── figure label (top-left) ──────────────────────────────────
+      const figNo = String(ALL_SHAPE_IDS.indexOf(sid) + 1).padStart(3, "0")
+      ctx.fillStyle = INK; ctx.font = "11px monospace"; ctx.globalAlpha = 0.7
+      ctx.fillText(`FIG_${figNo}`, 36, 27)
+      ctx.globalAlpha = 1
+
+      // ── title block (bottom-right, drawing-plate style) ──────────
       const posLabel =
         vertPos > 0.06  ? "ABOVE EYE LEVEL"
         : vertPos < -0.06 ? "BELOW EYE LEVEL"
         : "AT EYE LEVEL"
-      ctx.fillText(posLabel, 36, H - 20)
+      const nVPs = vps.filter(v => v.pt).length
+      const rows: [string, string, string][] = [
+        ["FORM", SHAPE_FULL_LABELS[sid], INK],
+        ["PROJ", `${nVPs}-PT PERSPECTIVE`, INK],
+        ["VIEW", posLabel, RED],
+      ]
+      const tbW = 200, tbRow = 22, tbH = tbRow * rows.length
+      const tbX = W - 24 - tbW, tbY = H - 24 - tbH
+      ctx.font = "11px monospace"
+      ctx.fillStyle = "rgba(255,255,255,0.55)"
+      ctx.fillRect(tbX, tbY, tbW, tbH)
+      ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha = 0.55
+      ctx.strokeRect(tbX + 0.5, tbY + 0.5, tbW, tbH)
+      for (let i = 1; i < rows.length; i++) {
+        ctx.beginPath()
+        ctx.moveTo(tbX, tbY + i * tbRow + 0.5); ctx.lineTo(tbX + tbW, tbY + i * tbRow + 0.5)
+        ctx.stroke()
+      }
+      ctx.beginPath()
+      ctx.moveTo(tbX + 50.5, tbY); ctx.lineTo(tbX + 50.5, tbY + tbH)
+      ctx.stroke()
+      ctx.globalAlpha = 1
+      rows.forEach(([key, val, color], i) => {
+        const ty = tbY + i * tbRow + 15
+        ctx.fillStyle = INK; ctx.globalAlpha = 0.5
+        ctx.fillText(key, tbX + 8, ty)
+        ctx.globalAlpha = 0.85
+        ctx.fillStyle = color
+        ctx.fillText(val, tbX + 58, ty)
+      })
       ctx.globalAlpha = 1
     },
     [],
@@ -177,18 +342,20 @@ export function ThreeCube({
     const camera = new THREE.PerspectiveCamera(
       45, wrap.clientWidth / wrap.clientHeight, 0.1, 1000,
     )
-    camera.position.set(0, 0, 5)
+    camera.position.set(...HOME_CAM)
     camera.lookAt(0, 0, 0)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enablePan  = false
-    controls.minDistance = 2
-    controls.maxDistance = 15
+    controls.minDistance = 1.2   // close enough to study a face…
+    controls.maxDistance = 10    // …far enough to see the whole apparatus, never lose the form
     controls.target.set(0, 0, 0)
     controls.update()
 
     const scene      = new THREE.Scene()
     const cubeGroup  = new THREE.Group()
+    // Match the overlay's Euler order — tilt/roll pivot on the cube's own axes
+    cubeGroup.rotation.order = "YXZ"
     const shapeGroup = new THREE.Group()
     scene.add(cubeGroup, shapeGroup)
 
@@ -305,11 +472,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, showGuides, shapeId, shapeParams } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, shapeId, hw, hh, hd)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis)
     }
     animate()
 
@@ -332,11 +499,25 @@ export function ThreeCube({
     }
   }, [drawOverlay])
 
-  // ── Reset camera to default position ─────────────────────────────
+  // ── Zoom buttons: dolly toward/away from the target, clamped ─────
+  useEffect(() => {
+    const three = threeRef.current
+    if (!three || zoomAction.n === 0) return
+    const { camera, controls } = three
+    const offset = camera.position.clone().sub(controls.target)
+    const dist = THREE.MathUtils.clamp(
+      offset.length() * (zoomAction.dir > 0 ? 1 / 1.3 : 1.3),
+      controls.minDistance, controls.maxDistance,
+    )
+    camera.position.copy(controls.target).addScaledVector(offset.normalize(), dist)
+    controls.update()
+  }, [zoomAction])
+
+  // ── Reset: camera face-on to the form, at eye level ──────────────
   useEffect(() => {
     const three = threeRef.current
     if (!three || resetCount === 0) return
-    three.camera.position.set(0, 0, 5)
+    three.camera.position.set(...FACE_CAM)
     three.controls.target.set(0, 0, 0)
     three.controls.update()
   }, [resetCount])
@@ -397,8 +578,41 @@ export function ThreeCube({
       cubeSolid.renderOrder = 3
 
       cubeGroup.add(depthMesh, frontShade, cubeGhost, cubeSolid)
+
+      // Local X/Y/Z axis lines through the form's centre — they rotate with
+      // the cube so the active rotation axis is easy to spot. The axis whose
+      // slider is in use draws solid red; with SHOW AXES off, only that
+      // active axis appears while rotating.
+      const axisSegs: ["x" | "y" | "z", number[]][] = [
+        ["x", [-(hw + 0.42), 0, 0,   hw + 0.42, 0, 0]],
+        ["y", [0, -(hh + 0.42), 0,   0, hh + 0.42, 0]],
+        ["z", [0, 0, -(hd + 0.42),   0, 0, hd + 0.42]],
+      ]
+      axisSegs.forEach(([axis, pts]) => {
+        const active = axis === activeAxis
+        if (!active && !showAxes) return
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
+        const line = new THREE.LineSegments(geo, active
+          ? new THREE.LineBasicMaterial({
+              color: ORANGE_THREE, transparent: true, opacity: 0.9, depthTest: false,
+            })
+          : new THREE.LineDashedMaterial({
+              color: INK_THREE, transparent: true, opacity: 0.45,
+              dashSize: 0.05, gapSize: 0.04, depthTest: false,
+            }))
+        if (!active) line.computeLineDistances()
+        line.renderOrder = active ? 4 : 2
+        cubeGroup.add(line)
+      })
+
       cubeGroup.visible    = true
       cubeGroup.position.y = verticalPosition
+      cubeGroup.rotation.set(
+        rotationDeg.x * Math.PI / 180,
+        rotationDeg.y * Math.PI / 180,
+        rotationDeg.z * Math.PI / 180,
+      )
 
     } else if (shapeId === "tube") {
       cubeGroup.visible        = false
@@ -743,7 +957,7 @@ export function ThreeCube({
       three.latheSilhouetteGeo = silhouetteGeo
       three.latheProfile        = profile
     }
-  }, [shapeId, shapeParams, uRings, verticalPosition, showGuides, showContours])
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours])
 
   return (
     <div
@@ -751,8 +965,11 @@ export function ThreeCube({
       className="relative w-full h-full"
       style={{
         backgroundColor: "#eef0f7",
-        backgroundImage: "radial-gradient(#c0c4dc 1px, transparent 1px)",
-        backgroundSize: "24px 24px",
+        backgroundImage: [
+          "radial-gradient(ellipse 90% 70% at 50% 42%, rgba(255,255,255,0.5), transparent 75%)",
+          "radial-gradient(#c0c4dc 1px, transparent 1px)",
+        ].join(", "),
+        backgroundSize: "100% 100%, 24px 24px",
       }}
     >
       <canvas

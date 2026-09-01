@@ -1,19 +1,75 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Cone, Cuboid, Cylinder, Egg, Globe, Pill, Worm, type LucideIcon } from "lucide-react"
 import { ThreeCube } from "@/components/three-cube"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import {
-  SHAPE_LABELS, getParametricShape,
+  ALL_SHAPE_IDS, SHAPE_LABELS, getParametricShape,
   CUBE_CONTROLS, CUBE_DEFAULT_PARAMS,
   SPHERE_CONTROLS, SPHERE_DEFAULT_PARAMS,
   TUBE_CONTROLS, TUBE_DEFAULT_PARAMS,
   type ShapeId, type ShapeParams,
 } from "@/lib/shapes"
 
-const INK = "#5B5BD6"
+const INK      = "#5B5BD6"
+const INK_DEEP = "#33338A"
+const RED      = "#C4553B"   // canvas apparatus colour — panel legend only
+const ORANGE      = "#F0954F" // interactive accent: fills for active states & controls
+const ORANGE_DEEP = "#C4651C" // same accent, darker — text, borders, thin marks
+
+const SHAPE_ICONS: Record<ShapeId, LucideIcon> = {
+  cube:     Cuboid,
+  cylinder: Cylinder,
+  sphere:   Globe,
+  capsule:  Pill,
+  cone:     Cone,
+  egg:      Egg,
+  tube:     Worm,
+}
+
+function SectionHeader({ n, title }: { n: string; title: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[10px]" style={{ color: `${INK}99` }}>{n}</span>
+      <span className="font-mono text-[11px] tracking-[0.22em]" style={{ color: INK_DEEP }}>{title}</span>
+      <div className="flex-1 border-t" style={{ borderColor: `${INK}2b` }} />
+    </div>
+  )
+}
+
+function ControlRow({
+  label, valueText, children,
+}: { label: string; valueText: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-baseline justify-between">
+        <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: `${INK_DEEP}cc` }}>
+          {label}
+        </Label>
+        <span className="font-mono text-[11px] tabular-nums" style={{ color: INK }}>
+          {valueText}
+        </span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function ToggleRow({
+  label, checked, onChange,
+}: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: `${INK_DEEP}cc` }}>
+        {label}
+      </Label>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
 
 export default function Home() {
   const [shapeId,      setShapeId]      = useState<ShapeId>("cube")
@@ -21,8 +77,21 @@ export default function Home() {
   const [uRings,       setURings]       = useState(6)
   const [showContours, setShowContours] = useState(true)
   const [vertPos,      setVertPos]      = useState(0)
+  const [rotationDeg,  setRotationDeg]  = useState({ x: 0, y: 0, z: 0 })
   const [guides,       setGuides]       = useState(true)
+  const [showAxes,     setShowAxes]     = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
+  const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
+  const [activeAxis,   setActiveAxis]   = useState<"x" | "y" | "z" | null>(null)
+
+  // Highlight the axis being rotated; fade it out shortly after the last change
+  const axisTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const markAxisActive = (axis: "x" | "y" | "z") => {
+    setActiveAxis(axis)
+    if (axisTimer.current) clearTimeout(axisTimer.current)
+    axisTimer.current = setTimeout(() => setActiveAxis(null), 900)
+  }
+  useEffect(() => () => { if (axisTimer.current) clearTimeout(axisTimer.current) }, [])
 
   const shapeDef = shapeId !== "cube" && shapeId !== "tube" ? getParametricShape(shapeId) : null
   const params   = shapeId === "cube"    ? { ...CUBE_DEFAULT_PARAMS,   ...shapeParams }
@@ -33,6 +102,9 @@ export default function Home() {
                  : shapeId === "sphere" ? SPHERE_CONTROLS
                  : shapeId === "tube"   ? TUBE_CONTROLS
                  : (shapeDef?.controls ?? [])
+
+  const plateNo = String(ALL_SHAPE_IDS.indexOf(shapeId) + 1).padStart(3, "0")
+  const posText = vertPos > 0.06 ? "above eye level" : vertPos < -0.06 ? "below eye level" : "at eye level"
 
   const handleShapeChange = (id: ShapeId) => {
     setShapeId(id)
@@ -49,127 +121,222 @@ export default function Home() {
           shapeParams={params}
           uRings={uRings}
           verticalPosition={vertPos}
+          rotationDeg={rotationDeg}
+          activeAxis={activeAxis}
+          showAxes={showAxes}
           showGuides={guides}
           showContours={showContours}
           resetCount={resetCount}
+          zoomAction={zoomAction}
         />
       </div>
 
       {/* Controls */}
       <aside
-        className="w-60 flex-none flex flex-col gap-6 p-6 border-l overflow-y-auto"
-        style={{ borderColor: `${INK}22` }}
+        className="ink-panel w-80 flex-none flex flex-col gap-7 px-7 py-6 border-l overflow-y-auto"
+        style={{ borderColor: `${INK}26`, background: "#f7f8fd" }}
       >
-        <p className="font-mono text-xs tracking-widest" style={{ color: INK }}>
-          [ CONTROLS ]
-        </p>
+        {/* Plate header */}
+        <header className="flex flex-col gap-1">
+          <div className="flex items-baseline justify-between font-mono text-[10px] tracking-[0.18em]">
+            <span style={{ color: `${INK}aa` }}>PLATE Nº {plateNo}</span>
+            <span style={{ color: `${INK}77` }}>PERSPECTIVE</span>
+          </div>
+          <h1
+            className="text-[36px] leading-tight italic"
+            style={{ fontFamily: "var(--font-display)", color: INK_DEEP }}
+          >
+            Form Study
+          </h1>
+          <p className="font-mono text-[11px]" style={{ color: `${INK}88` }}>
+            drawing the basic forms in space
+          </p>
+          <div className="mt-2 flex items-center gap-1.5">
+            <div className="flex-1 border-t" style={{ borderColor: `${INK}44` }} />
+            <div className="size-1 rotate-45 border" style={{ borderColor: INK, opacity: 0.55 }} />
+            <div className="flex-1 border-t" style={{ borderColor: `${INK}44` }} />
+          </div>
+        </header>
 
-        {/* Shape selector */}
-        <div className="flex flex-col gap-2">
-          <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-            SHAPE
-          </Label>
-          <div className="flex flex-wrap gap-1">
-            {(["cube", "cylinder", "sphere", "capsule", "cone", "egg", "tube"] as ShapeId[]).map(id => (
+        {/* 01 · Form */}
+        <section className="flex flex-col gap-3">
+          <SectionHeader n="01" title="FORM" />
+          <div className="grid grid-cols-4 gap-1.5">
+            {ALL_SHAPE_IDS.map(id => {
+              const active = shapeId === id
+              const Icon = SHAPE_ICONS[id]
+              return (
+                <button
+                  key={id}
+                  onClick={() => handleShapeChange(id)}
+                  title={SHAPE_LABELS[id]}
+                  className="flex flex-col items-center gap-1 border pt-2 pb-1.5 transition-colors duration-150 hover:bg-white"
+                  style={{
+                    borderColor: active ? ORANGE_DEEP : `${INK}33`,
+                    background: active ? ORANGE : undefined,
+                    color: active ? INK_DEEP : `${INK}bb`,
+                  }}
+                >
+                  <Icon size={24} strokeWidth={1.5} />
+                  <span className="font-mono text-[9px] tracking-wider">
+                    {SHAPE_LABELS[id]}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        {/* 02 · Proportion */}
+        <section className="flex flex-col gap-4">
+          <SectionHeader n="02" title="PROPORTION" />
+          {controls.map(ctrl => (
+            <ControlRow
+              key={ctrl.key}
+              label={ctrl.label}
+              valueText={(params[ctrl.key] ?? ctrl.min).toFixed(2)}
+            >
+              <Slider
+                min={Math.round(ctrl.min * 100)}
+                max={Math.round(ctrl.max * 100)}
+                step={1}
+                value={Math.round((params[ctrl.key] ?? ctrl.min) * 100)}
+                onValueChange={(v) =>
+                  setShapeParams(prev => ({ ...prev, [ctrl.key]: (v as number) / 100 }))
+                }
+              />
+            </ControlRow>
+          ))}
+        </section>
+
+        {/* 03 · View */}
+        <section className="flex flex-col gap-4">
+          <SectionHeader n="03" title="VIEW" />
+
+          {shapeId === "cube" && (
+            <>
+              {([["SPIN · Y", "y"], ["TILT · X", "x"], ["ROLL · Z", "z"]] as const).map(([label, axis]) => (
+                <ControlRow
+                  key={axis}
+                  label={label}
+                  valueText={`${rotationDeg[axis] > 0 ? "+" : ""}${rotationDeg[axis]}°`}
+                >
+                  <div className="relative">
+                    {/* center tick marking the unrotated orientation */}
+                    <div
+                      className="absolute left-1/2 -top-1 h-1.5 w-px -translate-x-1/2"
+                      style={{ background: ORANGE_DEEP, opacity: 0.8 }}
+                    />
+                    <Slider
+                      min={-45} max={45} step={1}
+                      value={rotationDeg[axis]}
+                      onValueChange={(v) => {
+                        markAxisActive(axis)
+                        setRotationDeg(prev => ({ ...prev, [axis]: v as number }))
+                      }}
+                    />
+                  </div>
+                </ControlRow>
+              ))}
+              <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: `${INK}99` }}>
+                spin slides the VPs — tilt &amp; roll swing the form&apos;s horizon off eye level
+              </p>
+            </>
+          )}
+
+          <ControlRow
+            label="VERTICAL POSITION"
+            valueText={`${vertPos > 0 ? "+" : vertPos < 0 ? "−" : ""}${Math.abs(vertPos).toFixed(2)}`}
+          >
+            <div className="relative">
+              {/* center tick marking eye level */}
+              <div
+                className="absolute left-1/2 -top-1 h-1.5 w-px -translate-x-1/2"
+                style={{ background: ORANGE_DEEP, opacity: 0.8 }}
+              />
+              <Slider
+                min={-150} max={150} step={1}
+                value={Math.round(vertPos * 100)}
+                onValueChange={(v) => setVertPos((v as number) / 100)}
+              />
+            </div>
+            <p className="font-mono text-[11px]" style={{ color: `${INK}99` }}>
+              {posText}
+            </p>
+          </ControlRow>
+
+          {shapeId !== "cube" && showContours && (
+            <ControlRow
+              label="CONTOUR RINGS"
+              valueText={`${uRings} ring${uRings !== 1 ? "s" : ""}`}
+            >
+              <Slider
+                min={1} max={16} step={1}
+                value={uRings}
+                onValueChange={(v) => setURings(v as number)}
+              />
+            </ControlRow>
+          )}
+
+          <div className="flex flex-col gap-3 pt-1">
+            {shapeId !== "cube" && (
+              <ToggleRow label="SHOW CONTOURS" checked={showContours} onChange={setShowContours} />
+            )}
+            <ToggleRow label="SHOW GUIDES" checked={guides} onChange={setGuides} />
+            {shapeId === "cube" && (
+              <ToggleRow label="SHOW AXES" checked={showAxes} onChange={setShowAxes} />
+            )}
+          </div>
+
+          <div className="mt-1 flex gap-1.5">
+            {([["−", -1], ["+", 1]] as const).map(([sym, dir]) => (
               <button
-                key={id}
-                onClick={() => handleShapeChange(id)}
-                className="font-mono text-xs px-2 py-1 border transition-colors"
-                style={{
-                  borderColor: `${INK}44`,
-                  background: shapeId === id ? INK : "transparent",
-                  color: shapeId === id ? "#fff" : `${INK}99`,
-                }}
+                key={sym}
+                onClick={() => setZoomAction(a => ({ dir, n: a.n + 1 }))}
+                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[#F0954F] hover:text-[#33338A]"
+                style={{ borderColor: `${ORANGE_DEEP}77`, color: ORANGE_DEEP }}
               >
-                {SHAPE_LABELS[id]}
+                ZOOM {sym}
               </button>
             ))}
           </div>
-        </div>
+          <button
+            onClick={() => {
+              setRotationDeg({ x: 0, y: 0, z: 0 })
+              setResetCount(c => c + 1)
+            }}
+            className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[#F0954F] hover:text-[#33338A]"
+            style={{ borderColor: `${ORANGE_DEEP}77`, color: ORANGE_DEEP }}
+          >
+            ⟲ RESET VIEW
+          </button>
+        </section>
 
-        {/* Common controls */}
-        <div className="flex flex-col gap-3">
-          <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-            VERTICAL POSITION
-          </Label>
-          <Slider
-            min={-150} max={150} step={1}
-            value={Math.round(vertPos * 100)}
-            onValueChange={(v) => setVertPos((v as number) / 100)}
-          />
-          <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-            {vertPos > 0.06 ? "above eye level" : vertPos < -0.06 ? "below eye level" : "at eye level"}
-          </p>
-        </div>
-
-        {/* Shape-specific params */}
-        {controls.map(ctrl => (
-          <div key={ctrl.key} className="flex flex-col gap-3">
-            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-              {ctrl.label}
-            </Label>
-            <Slider
-              min={Math.round(ctrl.min * 100)}
-              max={Math.round(ctrl.max * 100)}
-              step={1}
-              value={Math.round((params[ctrl.key] ?? ctrl.min) * 100)}
-              onValueChange={(v) =>
-                setShapeParams(prev => ({ ...prev, [ctrl.key]: (v as number) / 100 }))
-              }
-            />
-            <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-              {(params[ctrl.key] ?? ctrl.min).toFixed(2)}
-            </p>
-          </div>
-        ))}
-
-        {/* Contour ring count — only visible when contours are on */}
-        {shapeId !== "cube" && showContours && (
-          <div className="flex flex-col gap-3">
-            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-              CONTOUR RINGS
-            </Label>
-            <Slider
-              min={1} max={16} step={1}
-              value={uRings}
-              onValueChange={(v) => setURings(v as number)}
-            />
-            <p className="font-mono text-xs" style={{ color: `${INK}66` }}>
-              {uRings} ring{uRings !== 1 ? "s" : ""}
-            </p>
-          </div>
-        )}
-
-        {shapeId !== "cube" && (
-          <div className="flex items-center gap-3">
-            <Switch checked={showContours} onCheckedChange={setShowContours} />
-            <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-              SHOW CONTOURS
-            </Label>
-          </div>
-        )}
-
-        <div className="flex items-center gap-3">
-          <Switch checked={guides} onCheckedChange={setGuides} />
-          <Label className="font-mono text-xs tracking-wider" style={{ color: INK }}>
-            SHOW GUIDES
-          </Label>
-        </div>
-
-        <button
-          onClick={() => setResetCount(c => c + 1)}
-          className="font-mono text-xs px-3 py-1.5 border w-full transition-colors"
-          style={{ borderColor: `${INK}44`, color: `${INK}99` }}
+        {/* Legend / footer */}
+        <footer
+          className="mt-auto flex flex-col gap-2 border-t pt-4 font-mono text-[11px]"
+          style={{ borderColor: `${INK}26`, color: `${INK}88` }}
         >
-          RESET VIEW
-        </button>
-
-        <div className="mt-auto font-mono text-xs leading-relaxed" style={{ color: `${INK}44` }}>
-          <p>Drag to orbit.</p>
-          <p>Scroll to zoom.</p>
-          <p>Front edges solid.</p>
-          <p>Hidden edges faint.</p>
-        </div>
+          <div className="flex items-center gap-2">
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1.6" /></svg>
+            <span>visible edge</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1" strokeDasharray="3 3" opacity="0.4" /></svg>
+            <span>hidden edge</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={RED} strokeWidth="1" strokeDasharray="5 3" opacity="0.8" /></svg>
+            <span>horizon · eye level · guides</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" /></svg>
+            <span>form axes X · Y · Z</span>
+          </div>
+          <p className="mt-2" style={{ color: `${INK}66` }}>
+            drag to orbit · scroll to zoom
+          </p>
+        </footer>
       </aside>
     </div>
   )
