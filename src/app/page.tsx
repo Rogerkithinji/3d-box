@@ -86,6 +86,8 @@ export default function Home() {
   const [showDegrees,  setShowDegrees]  = useState(true)
   const [wrapContours, setWrapContours] = useState(true)
   const [showCone,     setShowCone]     = useState(true)
+  const [copies,       setCopies]       = useState(1)
+  const [spacing,      setSpacing]      = useState(1.6)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
@@ -158,6 +160,8 @@ export default function Home() {
           wrapContours={wrapContours}
           showCone={showCone}
           dark={dark}
+          copies={copies}
+          spacing={spacing}
         />
       </div>
 
@@ -375,6 +379,33 @@ export default function Home() {
           >
             ⟲ RESET VIEW
           </button>
+        </section>
+
+        {/* 04 · Repeat */}
+        <section className="flex flex-col gap-4">
+          <SectionHeader n="04" title="REPEAT" />
+          <ControlRow
+            label="COPIES"
+            valueText={copies === 1 ? "off" : `${copies} in a row`}
+          >
+            <Slider
+              min={1} max={6} step={1}
+              value={copies}
+              onValueChange={(v) => setCopies(v as number)}
+            />
+          </ControlRow>
+          {copies > 1 && (
+            <ControlRow label="SPACING" valueText={spacing.toFixed(2)}>
+              <Slider
+                min={60} max={300} step={5}
+                value={Math.round(spacing * 100)}
+                onValueChange={(v) => setSpacing((v as number) / 100)}
+              />
+              <p className="font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+                equal steps in space shrink lawfully toward the VP
+              </p>
+            </ControlRow>
+          )}
         </section>
 
         {/* Legend / footer */}

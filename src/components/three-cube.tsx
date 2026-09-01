@@ -27,6 +27,8 @@ interface Props {
   wrapContours:     boolean
   showCone:         boolean
   dark:             boolean
+  copies:           number
+  spacing:          number
 }
 
 const INK       = "#5B5BD6"
@@ -55,7 +57,7 @@ const PLATE_PALETTES = {
   },
 }
 
-const GRID_EXT = 3.2, GRID_STEP = 0.4, GRID_SUB = 8
+const GRID_EXT = 6.4, GRID_STEP = 0.4, GRID_SUB = 8
 function buildGroundGrid(pal: { gridInk: string; gridPaper: string }) {
   const gridInk   = new THREE.Color(pal.gridInk)
   const gridPaper = new THREE.Color(pal.gridPaper)
@@ -92,7 +94,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone, dark,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone, dark, copies, spacing,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -120,18 +122,21 @@ export function ThreeCube({
     shadowMesh:          THREE.Mesh
     gridGeo:             THREE.BufferGeometry
     fatMats:             LineMaterial[]
+    copyGroups:          THREE.Group[]
+    copyShadows:         THREE.Mesh[]
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
     (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
      rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
      topView: boolean, sp: ShapeParams,
-     degrees: boolean, contours: boolean, ringsN: number, cone: boolean, dk: boolean) => {
+     degrees: boolean, contours: boolean, ringsN: number, cone: boolean, dk: boolean,
+     nCopies: number, gap: number) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -509,29 +514,35 @@ export function ThreeCube({
         })
         ctx.setLineDash([])
 
-        // form footprint
-        ctx.strokeStyle = INK; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.1
-        if (sid === "cube") {
-          for (const sy of [-1, 1]) {
-            ctx.beginPath()
-            for (let i = 0; i <= 4; i++) {
-              const sx = [1, 1, -1, -1][i % 4], sz = [1, -1, -1, 1][i % 4]
-              const c = new THREE.Vector3(sx * hw, sy * hh, sz * hd).applyEuler(eul)
-              const [px, py] = P(c.x, c.z)
-              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+        // form footprints — the original plus any copies receding along Z
+        ctx.strokeStyle = INK; ctx.lineWidth = 1.1
+        for (let ci = 0; ci < Math.max(1, nCopies); ci++) {
+          const wz = -ci * gap
+          ctx.globalAlpha = ci === 0 ? 0.75 : 0.45
+          if (sid === "cube") {
+            for (const sy of [-1, 1]) {
+              ctx.beginPath()
+              for (let i = 0; i <= 4; i++) {
+                const sx = [1, 1, -1, -1][i % 4], sz = [1, -1, -1, 1][i % 4]
+                const c = new THREE.Vector3(sx * hw, sy * hh, sz * hd).applyEuler(eul)
+                const [px, py] = P(c.x, c.z + wz)
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+              }
+              ctx.stroke()
             }
-            ctx.stroke()
+          } else {
+            const fr =
+              sid === "cylinder" ? (sp.radius ?? 0.5)
+              : sid === "sphere"  ? (sp.radius ?? 0.8)
+              : sid === "capsule" ? (sp.radius ?? 0.45)
+              : sid === "cone"    ? Math.max(sp.baseRadius ?? 0.65, sp.topRadius ?? 0)
+              : sid === "egg"     ? (sp.radius ?? 0.5)
+              : (sp.radius ?? 0.15) + Math.abs(sp.bend ?? 0.7) * 0.5
+            const [ccx2, ccy2] = P(0, wz)
+            ctx.beginPath(); ctx.arc(ccx2, ccy2, fr * s, 0, Math.PI * 2); ctx.stroke()
           }
-        } else {
-          const fr =
-            sid === "cylinder" ? (sp.radius ?? 0.5)
-            : sid === "sphere"  ? (sp.radius ?? 0.8)
-            : sid === "capsule" ? (sp.radius ?? 0.45)
-            : sid === "cone"    ? Math.max(sp.baseRadius ?? 0.65, sp.topRadius ?? 0)
-            : sid === "egg"     ? (sp.radius ?? 0.5)
-            : (sp.radius ?? 0.15) + Math.abs(sp.bend ?? 0.7) * 0.5
-          ctx.beginPath(); ctx.arc(ox, oy, fr * s, 0, Math.PI * 2); ctx.stroke()
         }
+        ctx.globalAlpha = 0.75
 
         // station point
         ctx.fillStyle = RED; ctx.globalAlpha = 0.9
@@ -685,7 +696,7 @@ export function ThreeCube({
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
       latheSilhouetteGeo: null, latheProfile: [],
       sphereSilhouetteGeo: null, sphereRadius: 0.8,
-      fatMats: [],
+      fatMats: [], copyGroups: [], copyShadows: [],
     }
 
     // Continuous animation loop — OrbitControls needs this to interpolate damping
@@ -791,11 +802,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone, dark } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone, dark)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone, dark, copies, spacing)
     }
     animate()
 
@@ -1362,7 +1373,28 @@ export function ThreeCube({
     groundGroup.visible    = showGround
     groundGroup.position.y = verticalPosition + groundBottom - 0.02
     shadowMesh.scale.set(groundFoot * 2, groundFoot * 2, 1)
-  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours, dark])
+
+    // ── Multiples: a row of identical copies receding along world Z ──
+    // Clones share geometry and materials with the original, so the row
+    // is cheap; every copy obeys the same horizon and vanishing points.
+    three.copyGroups.forEach(g => three.scene.remove(g))
+    three.copyShadows.forEach(s => groundGroup.remove(s))
+    three.copyGroups = []
+    three.copyShadows = []
+    if (copies > 1) {
+      const source = shapeId === "cube" ? cubeGroup : shapeGroup
+      for (let i = 1; i < copies; i++) {
+        const g = source.clone()
+        g.position.z = -spacing * i
+        three.scene.add(g)
+        three.copyGroups.push(g)
+        const s = shadowMesh.clone()
+        s.position.z = -spacing * i
+        groundGroup.add(s)
+        three.copyShadows.push(s)
+      }
+    }
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours, dark, copies, spacing])
 
   return (
     <div
