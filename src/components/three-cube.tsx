@@ -20,6 +20,7 @@ interface Props {
   focalLength:      number
   showGround:       boolean
   showTopView:      boolean
+  showDegrees:      boolean
 }
 
 const INK       = "#5B5BD6"
@@ -41,7 +42,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -70,14 +71,15 @@ export function ThreeCube({
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
     (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
      rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
-     topView: boolean, sp: ShapeParams) => {
+     topView: boolean, sp: ShapeParams,
+     degrees: boolean, contours: boolean, ringsN: number) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -275,6 +277,56 @@ export function ThreeCube({
           ctx.fillStyle = active ? ORANGE : INK
           ctx.globalAlpha = active ? 1 : 0.75
           ctx.fillText(axis.toUpperCase(), sx - 3.5, sy + 4)
+        })
+        ctx.globalAlpha = 1
+      }
+
+      // ── ellipse degree readout (surfaces of revolution) ──────────
+      // The "degree" of each ring is the angle between your sight line
+      // and the ring's plane: 0° at eye level (a straight line), opening
+      // wider the farther the ring sits above or below it.
+      if (degrees && sid !== "cube" && sid !== "tube") {
+        const rings: { y: number; r: number }[] = []
+        if (sid === "cylinder") {
+          const radius = sp.radius ?? 0.5, height = sp.height ?? 1.5
+          rings.push({ y: height / 2, r: radius }, { y: -height / 2, r: radius })
+          if (contours) for (let i = 1; i <= ringsN; i++)
+            rings.push({ y: -height / 2 + height * i / (ringsN + 1), r: radius })
+        } else if (sid === "sphere") {
+          const radius = sp.radius ?? 0.8
+          if (contours) for (let i = 1; i <= ringsN; i++) {
+            const y = -radius + 2 * radius * i / (ringsN + 1)
+            rings.push({ y, r: Math.sqrt(Math.max(0, radius * radius - y * y)) })
+          }
+        } else {
+          const def = getParametricShape(sid)
+          if (def) {
+            const uu: number[] = [0, 1]
+            if (contours) for (let i = 1; i <= ringsN; i++) uu.push(i / (ringsN + 1))
+            uu.forEach(u => {
+              const [x, y] = def.surface(u, 0, sp)
+              if (x > 0.05) rings.push({ y, r: x })
+            })
+          }
+        }
+        // camera-right horizontal direction — labels sit at each ring's right edge
+        const dh  = Math.hypot(camera.position.x, camera.position.z) || 1e-4
+        const rhx = camera.position.z / dh, rhz = -camera.position.x / dh
+        const labels = rings.map(({ y, r }) => {
+          const cy = y + vertPos
+          const v = new THREE.Vector3(
+            -camera.position.x, cy - camera.position.y, -camera.position.z,
+          ).normalize()
+          const deg = Math.round(Math.asin(Math.min(1, Math.abs(v.y))) * 180 / Math.PI)
+          const [lx, ly] = toScreen(rhx * r, cy, rhz * r)
+          return { lx, ly, deg }
+        }).sort((a, b) => a.ly - b.ly)
+        ctx.font = "10px monospace"; ctx.fillStyle = RED; ctx.globalAlpha = 0.85
+        let prevY = -1e9
+        labels.forEach(l => {
+          if (l.ly - prevY < 13) return
+          prevY = l.ly
+          ctx.fillText(`${l.deg}°`, l.lx + 9, l.ly + 3.5)
         })
         ctx.globalAlpha = 1
       }
@@ -651,11 +703,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings)
     }
     animate()
 

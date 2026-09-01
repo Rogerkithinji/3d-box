@@ -82,6 +82,7 @@ export default function Home() {
   const [showAxes,     setShowAxes]     = useState(true)
   const [showGround,   setShowGround]   = useState(true)
   const [showTopView,  setShowTopView]  = useState(true)
+  const [showDegrees,  setShowDegrees]  = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
@@ -134,6 +135,7 @@ export default function Home() {
           focalLength={focalLength}
           showGround={showGround}
           showTopView={showTopView}
+          showDegrees={showDegrees}
         />
       </div>
 
@@ -302,6 +304,9 @@ export default function Home() {
           <div className="flex flex-col gap-3 pt-1">
             {shapeId !== "cube" && (
               <ToggleRow label="SHOW CONTOURS" checked={showContours} onChange={setShowContours} />
+            )}
+            {shapeId !== "cube" && shapeId !== "tube" && (
+              <ToggleRow label="ELLIPSE DEGREES" checked={showDegrees} onChange={setShowDegrees} />
             )}
             <ToggleRow label="SHOW GROUND" checked={showGround} onChange={setShowGround} />
             <ToggleRow label="SHOW GUIDES" checked={guides} onChange={setGuides} />
