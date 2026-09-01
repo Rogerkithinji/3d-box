@@ -24,6 +24,7 @@ interface Props {
   showGround:       boolean
   showTopView:      boolean
   showDegrees:      boolean
+  wrapContours:     boolean
 }
 
 const INK       = "#5B5BD6"
@@ -45,7 +46,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -817,12 +818,13 @@ export function ThreeCube({
       geo: LineSegmentsGeometry,
       opts: { width: number; opacity?: number; ghost?: boolean; dashed?: boolean },
     ) => {
-      const { width, opacity = 1, ghost = false, dashed = ghost } = opts
+      const { width, ghost = false, dashed = ghost } = opts
+      const opacity = opts.opacity ?? (ghost ? 0.16 : 1)
       const m = new LineMaterial({
         color: INK_THREE.getHex(),
         linewidth: width,
         transparent: ghost || opacity < 1,
-        opacity: ghost ? 0.16 : opacity,
+        opacity,
         depthTest: !ghost,
         dashed,
         dashSize: 0.05,
@@ -1012,8 +1014,12 @@ export function ThreeCube({
       const silGhost  = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
       shapeGroup.add(depthMesh, cap0, cap1, ringGhost, ringSolid, silGhost, silSolid)
-      if (contourPos.length)
-        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
+      if (contourPos.length) {
+        const contourGeo = segGeo(contourPos)
+        shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, opacity: 0.5 }))
+        if (wrapContours)
+          shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
+      }
       shapeGroup.position.y = verticalPosition
 
       groundBottom = -length / 2 - radius
@@ -1087,8 +1093,12 @@ export function ThreeCube({
       const silGhost  = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
       shapeGroup.add(depthMask, topCap, bottomCap, ringGhost, ringSolid, silGhost, silSolid)
-      if (contourPos.length)
-        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
+      if (contourPos.length) {
+        const contourGeo = segGeo(contourPos)
+        shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, opacity: 0.5 }))
+        if (wrapContours)
+          shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
+      }
       shapeGroup.position.y = verticalPosition
 
       three.cylSilhouetteGeo = silhouetteGeo
@@ -1134,8 +1144,12 @@ export function ThreeCube({
       const silGhost = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
       shapeGroup.add(depthMesh, silGhost, silSolid)
-      if (ringPos.length)
-        shapeGroup.add(fatLine(segGeo(ringPos), { width: CONTOUR_W, opacity: 0.5 }))
+      if (ringPos.length) {
+        const contourGeo = segGeo(ringPos)
+        shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, opacity: 0.5 }))
+        if (wrapContours)
+          shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
+      }
       shapeGroup.position.y = verticalPosition
 
       three.sphereSilhouetteGeo = silhouetteGeo
@@ -1222,8 +1236,12 @@ export function ThreeCube({
           fatLine(endGeo, { width: GHOST_W, ghost: true }),
         )
       }
-      if (contourPos.length)
-        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
+      if (contourPos.length) {
+        const contourGeo = segGeo(contourPos)
+        shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, opacity: 0.5 }))
+        if (wrapContours)
+          shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
+      }
       shapeGroup.position.y = verticalPosition
 
       three.latheSilhouetteGeo = silhouetteGeo
@@ -1237,7 +1255,7 @@ export function ThreeCube({
     groundGroup.visible    = showGround
     groundGroup.position.y = verticalPosition + groundBottom - 0.02
     shadowMesh.scale.set(groundFoot * 2, groundFoot * 2, 1)
-  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround])
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours])
 
   return (
     <div
