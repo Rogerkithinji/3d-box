@@ -175,7 +175,7 @@ export default function Home() {
               <button
                 onClick={toggleDark}
                 title={dark ? "Switch to day plate" : "Switch to night plate"}
-                className="transition-colors hover:opacity-100"
+                className="transition-all duration-200 hover:rotate-45 hover:scale-125 hover:opacity-100"
                 style={{ color: ORANGE_DEEP, opacity: 0.85 }}
               >
                 {dark ? <Sun size={13} /> : <Moon size={13} />}

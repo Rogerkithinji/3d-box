@@ -171,6 +171,17 @@
   background: rgba(143, 143, 232, 0.3);
 }
 
+/* Toggle switch hover: the track fills toward its flipped state */
+.ink-panel [data-slot="switch"] {
+  transition: background-color 0.18s ease;
+}
+.ink-panel [data-slot="switch"][data-unchecked]:hover {
+  background-color: color-mix(in srgb, var(--primary) 45%, var(--input));
+}
+.ink-panel [data-slot="switch"][data-checked]:hover {
+  background-color: color-mix(in srgb, var(--primary) 80%, white);
+}
+
 .ink-panel::-webkit-scrollbar {
   width: 4px;
 }
