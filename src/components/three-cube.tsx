@@ -26,6 +26,7 @@ interface Props {
   showDegrees:      boolean
   wrapContours:     boolean
   showCone:         boolean
+  dark:             boolean
 }
 
 const INK       = "#5B5BD6"
@@ -34,6 +35,50 @@ const RED       = "#C4553B"      // sanguine — perspective apparatus (horizon,
 const RED_FAINT = "rgba(196,85,59,0.16)"
 const ORANGE       = "#C4651C"   // interactive accent (deep) — the axis being rotated right now
 const ORANGE_THREE = new THREE.Color(ORANGE)
+
+// Day plate / night plate palettes for everything the CSS variables can't
+// reach: the WebGL scene and the 2D overlay canvas.
+const PLATE_PALETTES = {
+  light: {
+    ink: "#5B5BD6", red: "#C4553B", redFaint: "rgba(196,85,59,0.16)", orange: "#C4651C",
+    wash: "rgba(255,255,255,0.6)", washTitle: "rgba(255,255,255,0.55)",
+    coneWash: "rgba(196,85,59,0.035)", capTint: "#c8d5ff",
+    gridInk: "#7d7dd6", gridPaper: "#eef0f7", shadowRGB: "70, 70, 140", shadowA: 0.30,
+    paper: "#eef0f7", dot: "#c0c4dc", vignette: "rgba(255,255,255,0.5)",
+  },
+  dark: {
+    ink: "#8f8fe8", red: "#e08063", redFaint: "rgba(224,128,99,0.18)", orange: "#f0954f",
+    wash: "rgba(21,22,31,0.72)", washTitle: "rgba(21,22,31,0.66)",
+    coneWash: "rgba(224,128,99,0.05)", capTint: "#2c3161",
+    gridInk: "#585ba8", gridPaper: "#15161f", shadowRGB: "0, 0, 0", shadowA: 0.45,
+    paper: "#15161f", dot: "#2e3048", vignette: "rgba(70,74,110,0.25)",
+  },
+}
+
+const GRID_EXT = 3.2, GRID_STEP = 0.4, GRID_SUB = 8
+function buildGroundGrid(pal: { gridInk: string; gridPaper: string }) {
+  const gridInk   = new THREE.Color(pal.gridInk)
+  const gridPaper = new THREE.Color(pal.gridPaper)
+  const pos: number[] = []
+  const col: number[] = []
+  const pushVert = (x: number, z: number, main: boolean) => {
+    pos.push(x, 0, z)
+    const t = Math.min(1, Math.hypot(x, z) / (GRID_EXT * 1.05))
+    const c = gridPaper.clone().lerp(gridInk, (1 - t * t) * (main ? 0.55 : 0.3))
+    col.push(c.r, c.g, c.b)
+  }
+  for (let i = -GRID_EXT / GRID_STEP; i <= GRID_EXT / GRID_STEP; i++) {
+    const k = i * GRID_STEP
+    const main = i === 0
+    for (let s = 0; s < GRID_SUB; s++) {
+      const a = -GRID_EXT + (2 * GRID_EXT * s) / GRID_SUB
+      const b = -GRID_EXT + (2 * GRID_EXT * (s + 1)) / GRID_SUB
+      pushVert(a, k, main); pushVert(b, k, main)   // line parallel to X
+      pushVert(k, a, main); pushVert(k, b, main)   // line parallel to Z
+    }
+  }
+  return { pos, col }
+}
 const HALF      = 0.55
 // Default 3/4 view — the cube opens with both faces vanishing to their VPs
 const HOME_CAM: [number, number, number] = [2.3, 1.15, 4.3]
@@ -47,7 +92,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone, dark,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -73,24 +118,28 @@ export function ThreeCube({
     sphereRadius:        number
     groundGroup:         THREE.Group
     shadowMesh:          THREE.Mesh
+    gridGeo:             THREE.BufferGeometry
     fatMats:             LineMaterial[]
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
     (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
      rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
      topView: boolean, sp: ShapeParams,
-     degrees: boolean, contours: boolean, ringsN: number, cone: boolean) => {
+     degrees: boolean, contours: boolean, ringsN: number, cone: boolean, dk: boolean) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
 
       const { camera } = three
+      // Theme palette shadows the module colour constants for this draw
+      const pal = PLATE_PALETTES[dk ? "dark" : "light"]
+      const INK = pal.ink, RED = pal.red, RED_FAINT = pal.redFaint, ORANGE = pal.orange
       const W   = overlay.clientWidth
       const H   = overlay.clientHeight
       const dpr = window.devicePixelRatio || 1
@@ -214,7 +263,7 @@ export function ThreeCube({
         if (covR < Math.hypot(W / 2, H / 2)) {
           // whisper wash over the distortion zone
           ctx.save()
-          ctx.fillStyle = "rgba(196,85,59,0.035)"
+          ctx.fillStyle = pal.coneWash
           ctx.beginPath()
           ctx.rect(0, 0, W, H)
           ctx.arc(ccx, ccy, covR, 0, Math.PI * 2)
@@ -385,7 +434,7 @@ export function ThreeCube({
       if (topView) {
         const IW = 190, IH = 190
         const ix0 = 24, iy0 = H - 24 - IH
-        ctx.fillStyle = "rgba(255,255,255,0.6)"
+        ctx.fillStyle = pal.wash
         ctx.fillRect(ix0, iy0, IW, IH)
         ctx.strokeStyle = INK; ctx.globalAlpha = 0.55; ctx.lineWidth = 1
         ctx.strokeRect(ix0 + 0.5, iy0 + 0.5, IW, IH)
@@ -536,7 +585,7 @@ export function ThreeCube({
       const tbW = 200, tbRow = 22, tbH = tbRow * rows.length
       const tbX = W - 24 - tbW, tbY = H - 24 - tbH
       ctx.font = "11px monospace"
-      ctx.fillStyle = "rgba(255,255,255,0.55)"
+      ctx.fillStyle = pal.washTitle
       ctx.fillRect(tbX, tbY, tbW, tbH)
       ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha = 0.55
       ctx.strokeRect(tbX + 0.5, tbY + 0.5, tbW, tbH)
@@ -599,27 +648,7 @@ export function ThreeCube({
     // a soft contact shadow. It never tilts with the form — that contrast
     // is the point — and it slides to stay under the form's lowest point.
     const groundGroup = new THREE.Group()
-    const GRID_EXT = 3.2, GRID_STEP = 0.4, GRID_SUB = 8
-    const gridInk   = new THREE.Color("#7d7dd6")
-    const gridPaper = new THREE.Color("#eef0f7")
-    const gPos: number[] = []
-    const gCol: number[] = []
-    const pushVert = (x: number, z: number, main: boolean) => {
-      gPos.push(x, 0, z)
-      const t = Math.min(1, Math.hypot(x, z) / (GRID_EXT * 1.05))
-      const c = gridPaper.clone().lerp(gridInk, (1 - t * t) * (main ? 0.55 : 0.3))
-      gCol.push(c.r, c.g, c.b)
-    }
-    for (let i = -GRID_EXT / GRID_STEP; i <= GRID_EXT / GRID_STEP; i++) {
-      const k = i * GRID_STEP
-      const main = i === 0
-      for (let s = 0; s < GRID_SUB; s++) {
-        const a = -GRID_EXT + (2 * GRID_EXT * s) / GRID_SUB
-        const b = -GRID_EXT + (2 * GRID_EXT * (s + 1)) / GRID_SUB
-        pushVert(a, k, main); pushVert(b, k, main)   // line parallel to X
-        pushVert(k, a, main); pushVert(k, b, main)   // line parallel to Z
-      }
-    }
+    const { pos: gPos, col: gCol } = buildGroundGrid(PLATE_PALETTES.light)
     const gridGeo = new THREE.BufferGeometry()
     gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(gPos, 3))
     gridGeo.setAttribute("color",    new THREE.Float32BufferAttribute(gCol, 3))
@@ -650,7 +679,7 @@ export function ThreeCube({
 
     threeRef.current = {
       renderer, scene, camera, controls,
-      cubeGroup, shapeGroup, groundGroup, shadowMesh,
+      cubeGroup, shapeGroup, groundGroup, shadowMesh, gridGeo,
       cylSilhouetteGeo: null, cylRadius: 0.5, cylHeight: 1.5,
       tubeSilhouetteGeo: null, tubeRadius: 0.15,
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
@@ -762,11 +791,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone, dark } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone, dark)
     }
     animate()
 
@@ -789,6 +818,26 @@ export function ThreeCube({
       threeRef.current = null
     }
   }, [drawOverlay])
+
+  // ── Repaint the ground grid and shadow for the active theme ──────
+  useEffect(() => {
+    const three = threeRef.current
+    if (!three) return
+    const pal = PLATE_PALETTES[dark ? "dark" : "light"]
+    const { col } = buildGroundGrid(pal)
+    three.gridGeo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
+    const mat = three.shadowMesh.material as THREE.MeshBasicMaterial
+    const tex = mat.map as THREE.CanvasTexture
+    const c   = tex.image as HTMLCanvasElement
+    const g   = c.getContext("2d")!
+    g.clearRect(0, 0, c.width, c.height)
+    const grad = g.createRadialGradient(64, 64, 6, 64, 64, 62)
+    grad.addColorStop(0, `rgba(${pal.shadowRGB}, ${pal.shadowA})`)
+    grad.addColorStop(1, `rgba(${pal.shadowRGB}, 0)`)
+    g.fillStyle = grad
+    g.fillRect(0, 0, c.width, c.height)
+    tex.needsUpdate = true
+  }, [dark])
 
   // ── Focal length: set the FOV and dolly-compensate the distance so
   // the form keeps its apparent size — only the convergence changes ──
@@ -838,6 +887,11 @@ export function ThreeCube({
     const three = threeRef.current
     if (!three) return
     const { cubeGroup, shapeGroup } = three
+
+    // Theme palette shadows the module colour constants for this rebuild
+    const pal = PLATE_PALETTES[dark ? "dark" : "light"]
+    const INK_THREE    = new THREE.Color(pal.ink)
+    const ORANGE_THREE = new THREE.Color(pal.orange)
 
     // Lowest point and footprint radius of the form, for the ground plane
     let groundBottom = -HALF
@@ -915,7 +969,7 @@ export function ThreeCube({
       const frontShade = new THREE.Mesh(
         new THREE.PlaneGeometry(hw * 2, hh * 2),
         new THREE.MeshBasicMaterial({
-          color: new THREE.Color("#c8d5ff"), transparent: true, opacity: 0.3,
+          color: new THREE.Color(pal.capTint), transparent: true, opacity: 0.3,
           side: THREE.FrontSide, depthWrite: false,
           // coplanar with the depth mask's front face — offset wins the tie
           polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
@@ -1101,7 +1155,7 @@ export function ThreeCube({
 
       // Cap shades — FrontSide means each cap only renders when camera is on its side
       const capMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color("#c8d5ff"), transparent: true, opacity: 0.3,
+        color: new THREE.Color(pal.capTint), transparent: true, opacity: 0.3,
         side: THREE.FrontSide, depthWrite: false,
         // coplanar with the depth mask's caps — offset wins the tie
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
@@ -1308,17 +1362,17 @@ export function ThreeCube({
     groundGroup.visible    = showGround
     groundGroup.position.y = verticalPosition + groundBottom - 0.02
     shadowMesh.scale.set(groundFoot * 2, groundFoot * 2, 1)
-  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours])
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours, dark])
 
   return (
     <div
       ref={wrapRef}
       className="relative w-full h-full"
       style={{
-        backgroundColor: "#eef0f7",
+        backgroundColor: PLATE_PALETTES[dark ? "dark" : "light"].paper,
         backgroundImage: [
-          "radial-gradient(ellipse 90% 70% at 50% 42%, rgba(255,255,255,0.5), transparent 75%)",
-          "radial-gradient(#c0c4dc 1px, transparent 1px)",
+          `radial-gradient(ellipse 90% 70% at 50% 42%, ${PLATE_PALETTES[dark ? "dark" : "light"].vignette}, transparent 75%)`,
+          `radial-gradient(${PLATE_PALETTES[dark ? "dark" : "light"].dot} 1px, transparent 1px)`,
         ].join(", "),
         backgroundSize: "100% 100%, 24px 24px",
       }}

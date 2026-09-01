@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Cone, Cuboid, Cylinder, Egg, Globe, Pill, Worm, type LucideIcon } from "lucide-react"
+import { Cone, Cuboid, Cylinder, Egg, Globe, Moon, Pill, Sun, Worm, type LucideIcon } from "lucide-react"
 import { ThreeCube } from "@/components/three-cube"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
@@ -14,11 +14,12 @@ import {
   type ShapeId, type ShapeParams,
 } from "@/lib/shapes"
 
-const INK      = "#5B5BD6"
-const INK_DEEP = "#33338A"
-const RED      = "#C4553B"   // canvas apparatus colour — panel legend only
-const ORANGE      = "#F0954F" // interactive accent: fills for active states & controls
-const ORANGE_DEEP = "#C4651C" // same accent, darker — text, borders, thin marks
+// Palette lives in CSS variables on .plate (light) / .plate.dark-plate (dark)
+const INK         = "var(--ink)"
+const INK_DEEP    = "var(--ink-deep)"
+const RED         = "var(--red)"      // canvas apparatus colour — panel legend only
+const ORANGE      = "var(--orange)"       // interactive accent: fills for active states & controls
+const ORANGE_DEEP = "var(--orange-deep)"  // same accent, darker — text, borders, thin marks
 
 const SHAPE_ICONS: Record<ShapeId, LucideIcon> = {
   cube:     Cuboid,
@@ -33,9 +34,9 @@ const SHAPE_ICONS: Record<ShapeId, LucideIcon> = {
 function SectionHeader({ n, title }: { n: string; title: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="font-mono text-[10px]" style={{ color: `${INK}99` }}>{n}</span>
+      <span className="font-mono text-[10px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>{n}</span>
       <span className="font-mono text-[11px] tracking-[0.22em]" style={{ color: INK_DEEP }}>{title}</span>
-      <div className="flex-1 border-t" style={{ borderColor: `${INK}2b` }} />
+      <div className="flex-1 border-t" style={{ borderColor: "color-mix(in srgb, var(--ink) 17%, transparent)" }} />
     </div>
   )
 }
@@ -46,7 +47,7 @@ function ControlRow({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between">
-        <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: `${INK_DEEP}cc` }}>
+        <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
           {label}
         </Label>
         <span className="font-mono text-[11px] tabular-nums" style={{ color: INK }}>
@@ -63,7 +64,7 @@ function ToggleRow({
 }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="flex items-center justify-between">
-      <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: `${INK_DEEP}cc` }}>
+      <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
         {label}
       </Label>
       <Switch checked={checked} onCheckedChange={onChange} />
@@ -89,6 +90,22 @@ export default function Home() {
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
   const [activeAxis,   setActiveAxis]   = useState<"x" | "y" | "z" | null>(null)
+  const [dark,         setDark]         = useState(false)
+
+  // Restore the saved theme after mount (avoids a hydration mismatch)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("fs-theme")
+      if (stored) setDark(stored === "dark")
+      else setDark(window.matchMedia("(prefers-color-scheme: dark)").matches)
+    } catch { /* no storage — stay light */ }
+  }, [])
+  const toggleDark = () => {
+    setDark(d => {
+      try { localStorage.setItem("fs-theme", d ? "light" : "dark") } catch { /* ignore */ }
+      return !d
+    })
+  }
 
   // Highlight the axis being rotated; fade it out shortly after the last change
   const axisTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -118,7 +135,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: "#eef0f7" }}>
+    <div className={`plate ${dark ? "dark-plate" : ""} flex h-screen overflow-hidden`} style={{ background: "var(--paper)" }}>
 
       {/* Canvas */}
       <div className="flex-1 min-w-0">
@@ -140,19 +157,30 @@ export default function Home() {
           showDegrees={showDegrees}
           wrapContours={wrapContours}
           showCone={showCone}
+          dark={dark}
         />
       </div>
 
       {/* Controls */}
       <aside
         className="ink-panel w-80 flex-none flex flex-col gap-7 px-7 py-6 border-l overflow-y-auto"
-        style={{ borderColor: `${INK}26`, background: "#f7f8fd" }}
+        style={{ borderColor: "color-mix(in srgb, var(--ink) 15%, transparent)", background: "var(--panel)" }}
       >
         {/* Plate header */}
         <header className="flex flex-col gap-1">
           <div className="flex items-baseline justify-between font-mono text-[10px] tracking-[0.18em]">
-            <span style={{ color: `${INK}aa` }}>PLATE Nº {plateNo}</span>
-            <span style={{ color: `${INK}77` }}>PERSPECTIVE</span>
+            <span style={{ color: "color-mix(in srgb, var(--ink) 67%, transparent)" }}>PLATE Nº {plateNo}</span>
+            <span className="flex items-center gap-2.5">
+              <span style={{ color: "color-mix(in srgb, var(--ink) 47%, transparent)" }}>PERSPECTIVE</span>
+              <button
+                onClick={toggleDark}
+                title={dark ? "Switch to day plate" : "Switch to night plate"}
+                className="transition-colors hover:opacity-100"
+                style={{ color: ORANGE_DEEP, opacity: 0.85 }}
+              >
+                {dark ? <Sun size={13} /> : <Moon size={13} />}
+              </button>
+            </span>
           </div>
           <h1
             className="text-[36px] leading-tight italic"
@@ -160,13 +188,13 @@ export default function Home() {
           >
             Form Study
           </h1>
-          <p className="font-mono text-[11px]" style={{ color: `${INK}88` }}>
+          <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 53%, transparent)" }}>
             drawing the basic forms in space
           </p>
           <div className="mt-2 flex items-center gap-1.5">
-            <div className="flex-1 border-t" style={{ borderColor: `${INK}44` }} />
+            <div className="flex-1 border-t" style={{ borderColor: "color-mix(in srgb, var(--ink) 27%, transparent)" }} />
             <div className="size-1 rotate-45 border" style={{ borderColor: INK, opacity: 0.55 }} />
-            <div className="flex-1 border-t" style={{ borderColor: `${INK}44` }} />
+            <div className="flex-1 border-t" style={{ borderColor: "color-mix(in srgb, var(--ink) 27%, transparent)" }} />
           </div>
         </header>
 
@@ -184,9 +212,9 @@ export default function Home() {
                   title={SHAPE_LABELS[id]}
                   className="flex flex-col items-center gap-1 border pt-2 pb-1.5 transition-colors duration-150 hover:bg-white"
                   style={{
-                    borderColor: active ? ORANGE_DEEP : `${INK}33`,
+                    borderColor: active ? ORANGE_DEEP : "color-mix(in srgb, var(--ink) 20%, transparent)",
                     background: active ? ORANGE : undefined,
-                    color: active ? INK_DEEP : `${INK}bb`,
+                    color: active ? INK_DEEP : "color-mix(in srgb, var(--ink) 73%, transparent)",
                   }}
                 >
                   <Icon size={24} strokeWidth={1.5} />
@@ -231,7 +259,7 @@ export default function Home() {
               value={focalLength}
               onValueChange={(v) => setFocalLength(v as number)}
             />
-            <p className="font-mono text-[11px]" style={{ color: `${INK}99` }}>
+            <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
               {focalLength < 28
                 ? "wide angle — VPs pull close, drama up"
                 : focalLength <= 60
@@ -265,7 +293,7 @@ export default function Home() {
                   </div>
                 </ControlRow>
               ))}
-              <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: `${INK}99` }}>
+              <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
                 spin slides the VPs — tilt &amp; roll swing the form&apos;s horizon off eye level
               </p>
             </>
@@ -287,7 +315,7 @@ export default function Home() {
                 onValueChange={(v) => setVertPos((v as number) / 100)}
               />
             </div>
-            <p className="font-mono text-[11px]" style={{ color: `${INK}99` }}>
+            <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
               {posText}
             </p>
           </ControlRow>
@@ -329,8 +357,8 @@ export default function Home() {
               <button
                 key={sym}
                 onClick={() => setZoomAction(a => ({ dir, n: a.n + 1 }))}
-                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[#F0954F] hover:text-[#33338A]"
-                style={{ borderColor: `${ORANGE_DEEP}77`, color: ORANGE_DEEP }}
+                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)", color: ORANGE_DEEP }}
               >
                 ZOOM {sym}
               </button>
@@ -342,8 +370,8 @@ export default function Home() {
               setFocalLength(30)
               setResetCount(c => c + 1)
             }}
-            className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[#F0954F] hover:text-[#33338A]"
-            style={{ borderColor: `${ORANGE_DEEP}77`, color: ORANGE_DEEP }}
+            className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+            style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)", color: ORANGE_DEEP }}
           >
             ⟲ RESET VIEW
           </button>
@@ -352,25 +380,25 @@ export default function Home() {
         {/* Legend / footer */}
         <footer
           className="mt-auto flex flex-col gap-2 border-t pt-4 font-mono text-[11px]"
-          style={{ borderColor: `${INK}26`, color: `${INK}88` }}
+          style={{ borderColor: "color-mix(in srgb, var(--ink) 15%, transparent)", color: "color-mix(in srgb, var(--ink) 53%, transparent)" }}
         >
           <div className="flex items-center gap-2">
-            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1.6" /></svg>
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" style={{ stroke: INK }} strokeWidth="1.6" /></svg>
             <span>visible edge</span>
           </div>
           <div className="flex items-center gap-2">
-            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1" strokeDasharray="3 3" opacity="0.4" /></svg>
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" style={{ stroke: INK }} strokeWidth="1" strokeDasharray="3 3" opacity="0.4" /></svg>
             <span>hidden edge</span>
           </div>
           <div className="flex items-center gap-2">
-            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={RED} strokeWidth="1" strokeDasharray="5 3" opacity="0.8" /></svg>
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" style={{ stroke: RED }} strokeWidth="1" strokeDasharray="5 3" opacity="0.8" /></svg>
             <span>horizon · eye level · guides</span>
           </div>
           <div className="flex items-center gap-2">
-            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke={INK} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" /></svg>
+            <svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" style={{ stroke: INK }} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" /></svg>
             <span>form axes X · Y · Z</span>
           </div>
-          <p className="mt-2" style={{ color: `${INK}66` }}>
+          <p className="mt-2" style={{ color: "color-mix(in srgb, var(--ink) 40%, transparent)" }}>
             drag to orbit · scroll to zoom
           </p>
         </footer>

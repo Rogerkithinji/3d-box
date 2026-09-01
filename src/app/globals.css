@@ -130,14 +130,45 @@
   }
 }
 
-/* Instrument-panel theming for the study controls sidebar.
-   60/30/10: paper ground / indigo ink structure / orange interactive accent */
+/* Drawing-plate palette. 60/30/10: paper ground / indigo ink structure /
+   orange interactive accent. Dark = night drafting table. */
+.plate {
+  --paper: #eef0f7;
+  --panel: #f7f8fd;
+  --ink: #5b5bd6;
+  --ink-deep: #33338a;
+  --ink-deep-fixed: #33338a; /* stays dark in both themes — text on orange fills */
+  --red: #c4553b;
+  --orange: #f0954f;
+  --orange-deep: #c4651c;
+}
+.plate.dark-plate {
+  --paper: #15161f;
+  --panel: #191a26;
+  --ink: #8f8fe8;
+  --ink-deep: #cdcdf7;
+  --red: #e08063;
+  --orange: #f0954f;
+  --orange-deep: #e8a366;
+}
+
+/* Instrument-panel theming for the study controls sidebar */
 .ink-panel {
   --primary: #f0954f;
   --muted: rgba(91, 91, 214, 0.16);
   --ring: #c4651c;
   --input: rgba(91, 91, 214, 0.28);
   --background: #ffffff;
+}
+.dark-plate .ink-panel {
+  --primary: #f0954f;
+  --muted: rgba(143, 143, 232, 0.2);
+  --ring: #e8a366;
+  --input: rgba(143, 143, 232, 0.32);
+  --background: #262740;
+}
+.dark-plate .ink-panel::-webkit-scrollbar-thumb {
+  background: rgba(143, 143, 232, 0.3);
 }
 
 .ink-panel::-webkit-scrollbar {
