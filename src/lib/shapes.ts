@@ -133,9 +133,12 @@ export const SPHERE_CONTROLS: ControlDef[] = [
 export const SPHERE_DEFAULT_PARAMS: ShapeParams = { radius: 0.8 }
 
 export const TUBE_CONTROLS: ControlDef[] = [
-  { key: "radius", label: "RADIUS", min: 0.05, max: 0.45, step: 0.01 },
-  { key: "length", label: "LENGTH", min: 0.5,  max: 3.0,  step: 0.01 },
-  { key: "bend",   label: "BEND",   min: -1.5, max: 1.5,  step: 0.01 },
+  { key: "radius", label: "MID RADIUS", min: 0.05, max: 0.45, step: 0.01 },
+  { key: "taper",  label: "TAPER ENDS", min: 0,    max: 0.85, step: 0.01 },
+  { key: "length", label: "LENGTH",     min: 0.5,  max: 3.0,  step: 0.01 },
+  { key: "bendA",  label: "BEND · A",   min: -1.5, max: 1.5,  step: 0.01 },
+  { key: "bendB",  label: "BEND · B",   min: -1.5, max: 1.5,  step: 0.01 },
+  { key: "coil",   label: "COIL · TURNS", min: -2.5, max: 2.5, step: 0.01 },
 ]
 
-export const TUBE_DEFAULT_PARAMS: ShapeParams = { radius: 0.15, length: 2.0, bend: 0.7 }
+export const TUBE_DEFAULT_PARAMS: ShapeParams = { radius: 0.2, taper: 0.35, length: 2.2, bendA: 0.7, bendB: 0.7, coil: 0 }

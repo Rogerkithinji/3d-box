@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Cone, Cuboid, Cylinder, Egg, Globe, Moon, Pill, Sun, Worm, type LucideIcon } from "lucide-react"
-import { ThreeCube } from "@/components/three-cube"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { Cone, Cuboid, Cylinder, Dices, Egg, Globe, Moon, Pill, Sun, Worm, type LucideIcon } from "lucide-react"
+import { ThreeCube, type DrillPhase } from "@/components/three-cube"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
@@ -93,6 +93,15 @@ export default function Home() {
   const [focalLength,  setFocalLength]  = useState(30)
   const [activeAxis,   setActiveAxis]   = useState<"x" | "y" | "z" | null>(null)
   const [dark,         setDark]         = useState(false)
+  const [turntable,    setTurntable]    = useState(false)
+  const [facingTint,   setFacingTint]   = useState(true)
+  const [coilOn,       setCoilOn]       = useState(true)
+  const [ortho,        setOrtho]        = useState(false)
+  const [drill,        setDrill]        = useState<DrillPhase>("off")
+
+  // Orthographic is approximated by an extreme telephoto: the focal-length
+  // effect dolly-compensates, so only the convergence drains away.
+  const ORTHO_FOCAL = 700
 
   // Restore the saved theme after mount (avoids a hydration mismatch)
   useEffect(() => {
@@ -128,13 +137,63 @@ export default function Home() {
                  : shapeId === "tube"   ? TUBE_CONTROLS
                  : (shapeDef?.controls ?? [])
 
+  // The canvas sees coil 0 while the toggle is off; the slider keeps its value
+  const canvasParams = shapeId === "tube" && !coilOn ? { ...params, coil: 0 } : params
+
   const plateNo = String(ALL_SHAPE_IDS.indexOf(shapeId) + 1).padStart(3, "0")
   const posText = vertPos > 0.06 ? "above eye level" : vertPos < -0.06 ? "below eye level" : "at eye level"
 
   const handleShapeChange = (id: ShapeId) => {
     setShapeId(id)
     setShapeParams({})
+    setDrill("off")
   }
+
+  const randomPose = useCallback(() => {
+    const r = (a: number, b: number) => Math.round(a + Math.random() * (b - a))
+    setRotationDeg({ x: r(-25, 25), y: r(-45, 45), z: r(-12, 12) })
+    setVertPos(r(-130, 130) / 100)
+  }, [])
+
+  const resetView = useCallback(() => {
+    setRotationDeg({ x: 0, y: 0, z: 0 })
+    setFocalLength(30)
+    setResetCount(c => c + 1)
+  }, [])
+
+  const startDrill = () => {
+    setShapeId("cube")
+    setShapeParams({})
+    setOrtho(false)
+    randomPose()
+    setDrill("guess")
+  }
+
+  // Keyboard shortcuts — 1–7 forms · R reset · G guides · A axes ·
+  // D dice · T turntable · O ortho · space reveals the drill
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      const idx = "1234567".indexOf(k)
+      if (idx >= 0) {
+        if (drill !== "off") return   // drilling is cube-only — exit first
+        setShapeId(ALL_SHAPE_IDS[idx])
+        setShapeParams({})
+      }
+      else if (k === "r") resetView()
+      else if (k === "g") setGuides(v => !v)
+      else if (k === "a") setShowAxes(v => !v)
+      else if (k === "d") randomPose()
+      else if (k === "t") setTurntable(v => !v)
+      else if (k === "o") setOrtho(v => !v)
+      else if (k === " " && drill === "guess") { e.preventDefault(); setDrill("reveal") }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [drill, randomPose, resetView])
 
   return (
     <div className={`plate ${dark ? "dark-plate" : ""} flex h-screen overflow-hidden`} style={{ background: "var(--paper)" }}>
@@ -143,7 +202,7 @@ export default function Home() {
       <div className="flex-1 min-w-0">
         <ThreeCube
           shapeId={shapeId}
-          shapeParams={params}
+          shapeParams={canvasParams}
           uRings={uRings}
           verticalPosition={vertPos}
           rotationDeg={rotationDeg}
@@ -153,7 +212,7 @@ export default function Home() {
           showContours={showContours}
           resetCount={resetCount}
           zoomAction={zoomAction}
-          focalLength={focalLength}
+          focalLength={ortho ? ORTHO_FOCAL : focalLength}
           showGround={showGround}
           showTopView={showTopView}
           showDegrees={showDegrees}
@@ -162,6 +221,10 @@ export default function Home() {
           dark={dark}
           copies={copies}
           spacing={spacing}
+          turntable={turntable}
+          ortho={ortho}
+          drill={drill}
+          facingTint={facingTint}
         />
       </div>
 
@@ -234,37 +297,56 @@ export default function Home() {
         {/* 02 · Proportion */}
         <section className="flex flex-col gap-4">
           <SectionHeader n="02" title="PROPORTION" />
-          {controls.map(ctrl => (
-            <ControlRow
-              key={ctrl.key}
-              label={ctrl.label}
-              valueText={(params[ctrl.key] ?? ctrl.min).toFixed(2)}
-            >
-              <Slider
-                min={Math.round(ctrl.min * 100)}
-                max={Math.round(ctrl.max * 100)}
-                step={1}
-                value={Math.round((params[ctrl.key] ?? ctrl.min) * 100)}
-                onValueChange={(v) =>
-                  setShapeParams(prev => ({ ...prev, [ctrl.key]: (v as number) / 100 }))
-                }
-              />
-            </ControlRow>
-          ))}
+          {controls.map(ctrl => {
+            const coilOff = ctrl.key === "coil" && !coilOn
+            return (
+              <ControlRow
+                key={ctrl.key}
+                label={ctrl.label}
+                valueText={coilOff ? "off" : (params[ctrl.key] ?? ctrl.min).toFixed(2)}
+              >
+                <div className={coilOff ? "pointer-events-none opacity-40" : undefined}>
+                  <Slider
+                    min={Math.round(ctrl.min * 100)}
+                    max={Math.round(ctrl.max * 100)}
+                    step={1}
+                    value={Math.round((params[ctrl.key] ?? ctrl.min) * 100)}
+                    onValueChange={(v) =>
+                      setShapeParams(prev => ({ ...prev, [ctrl.key]: (v as number) / 100 }))
+                    }
+                  />
+                </div>
+              </ControlRow>
+            )
+          })}
+          {shapeId === "tube" && (
+            <>
+              <ToggleRow label="COIL" checked={coilOn} onChange={setCoilOn} />
+              {coilOn && (
+                <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+                  coil wraps the bend around the vertical axis — the bend sets the coil&apos;s width, so no bend means no coil
+                </p>
+              )}
+            </>
+          )}
         </section>
 
         {/* 03 · View */}
         <section className="flex flex-col gap-4">
           <SectionHeader n="03" title="VIEW" />
 
-          <ControlRow label="FOCAL LENGTH" valueText={`${focalLength}mm`}>
-            <Slider
-              min={20} max={135} step={1}
-              value={focalLength}
-              onValueChange={(v) => setFocalLength(v as number)}
-            />
+          <ControlRow label="FOCAL LENGTH" valueText={ortho ? "∞" : `${focalLength}mm`}>
+            <div className={ortho ? "pointer-events-none opacity-40" : undefined}>
+              <Slider
+                min={20} max={135} step={1}
+                value={focalLength}
+                onValueChange={(v) => setFocalLength(v as number)}
+              />
+            </div>
             <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
-              {focalLength < 28
+              {ortho
+                ? "parallel projection — depth without diminution"
+                : focalLength < 28
                 ? "wide angle — VPs pull close, drama up"
                 : focalLength <= 60
                 ? "normal lens — close to human vision"
@@ -272,7 +354,9 @@ export default function Home() {
             </p>
           </ControlRow>
 
-          {shapeId === "cube" && (
+          <ToggleRow label="ORTHOGRAPHIC" checked={ortho} onChange={setOrtho} />
+
+          {shapeId === "cube" && drill !== "guess" && (
             <>
               {([["SPIN · Y", "y"], ["TILT · X", "x"], ["ROLL · Z", "z"]] as const).map(([label, axis]) => (
                 <ControlRow
@@ -344,6 +428,16 @@ export default function Home() {
             {shapeId !== "cube" && showContours && (
               <ToggleRow label="WRAP CONTOURS" checked={wrapContours} onChange={setWrapContours} />
             )}
+            {shapeId === "tube" && (
+              <>
+                <ToggleRow label="FACING TINT" checked={facingTint} onChange={setFacingTint} />
+                {facingTint && (
+                  <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+                    <span style={{ color: ORANGE_DEEP }}>orange</span> ellipses open toward you — ink ones turn away. orbit and watch the flip point travel the bends
+                  </p>
+                )}
+              </>
+            )}
             {shapeId !== "cube" && shapeId !== "tube" && (
               <ToggleRow label="ELLIPSE DEGREES" checked={showDegrees} onChange={setShowDegrees} />
             )}
@@ -354,6 +448,7 @@ export default function Home() {
             )}
             <ToggleRow label="SHOW TOP VIEW" checked={showTopView} onChange={setShowTopView} />
             <ToggleRow label="CONE OF VISION" checked={showCone} onChange={setShowCone} />
+            <ToggleRow label="TURNTABLE" checked={turntable} onChange={setTurntable} />
           </div>
 
           <div className="mt-1 flex gap-1.5">
@@ -361,24 +456,30 @@ export default function Home() {
               <button
                 key={sym}
                 onClick={() => setZoomAction(a => ({ dir, n: a.n + 1 }))}
-                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
-                style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)", color: ORANGE_DEEP }}
+                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
               >
                 ZOOM {sym}
               </button>
             ))}
           </div>
-          <button
-            onClick={() => {
-              setRotationDeg({ x: 0, y: 0, z: 0 })
-              setFocalLength(30)
-              setResetCount(c => c + 1)
-            }}
-            className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
-            style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)", color: ORANGE_DEEP }}
-          >
-            ⟲ RESET VIEW
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              onClick={resetView}
+              className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+              style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
+            >
+              ⟲ RESET VIEW
+            </button>
+            <button
+              onClick={randomPose}
+              title="Random pose (D)"
+              className="flex items-center justify-center border px-3 transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+              style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
+            >
+              <Dices size={15} strokeWidth={1.5} />
+            </button>
+          </div>
         </section>
 
         {/* 04 · Repeat */}
@@ -408,6 +509,52 @@ export default function Home() {
           )}
         </section>
 
+        {/* 05 · Drill */}
+        <section className="flex flex-col gap-3">
+          <SectionHeader n="05" title="DRILL" />
+          {drill === "off" ? (
+            <>
+              <button
+                onClick={startDrill}
+                className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
+              >
+                ▶ GUESS THE BOX
+              </button>
+              <p className="font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+                only horizon, VPs &amp; one starting edge remain — imagine the cube, then reveal
+              </p>
+            </>
+          ) : (
+            <div className="flex gap-1.5">
+              {drill === "guess" ? (
+                <button
+                  onClick={() => setDrill("reveal")}
+                  className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] text-[var(--ink-deep-fixed)] transition-colors duration-150"
+                  style={{ borderColor: ORANGE_DEEP, background: ORANGE }}
+                >
+                  ◉ REVEAL
+                </button>
+              ) : (
+                <button
+                  onClick={() => { randomPose(); setDrill("guess") }}
+                  className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                  style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
+                >
+                  ⟳ NEW POSE
+                </button>
+              )}
+              <button
+                onClick={() => setDrill("off")}
+                className="border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
+              >
+                EXIT
+              </button>
+            </div>
+          )}
+        </section>
+
         {/* Legend / footer */}
         <footer
           className="mt-auto flex flex-col gap-2 border-t pt-4 font-mono text-[11px]"
@@ -431,6 +578,9 @@ export default function Home() {
           </div>
           <p className="mt-2" style={{ color: "color-mix(in srgb, var(--ink) 40%, transparent)" }}>
             drag to orbit · scroll to zoom
+          </p>
+          <p style={{ color: "color-mix(in srgb, var(--ink) 40%, transparent)" }}>
+            keys · 1–7 forms · R reset · G guides · A axes · D dice · T turntable · O ortho
           </p>
         </footer>
       </aside>

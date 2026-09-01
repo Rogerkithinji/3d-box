@@ -29,7 +29,13 @@ interface Props {
   dark:             boolean
   copies:           number
   spacing:          number
+  turntable:        boolean
+  ortho:            boolean
+  drill:            DrillPhase
+  facingTint:       boolean
 }
+
+export type DrillPhase = "off" | "guess" | "reveal"
 
 const INK       = "#5B5BD6"
 const INK_THREE = new THREE.Color(INK)
@@ -55,6 +61,24 @@ const PLATE_PALETTES = {
     gridInk: "#585ba8", gridPaper: "#15161f", shadowRGB: "0, 0, 0", shadowA: 0.45,
     paper: "#15161f", dot: "#2e3048", vignette: "rgba(70,74,110,0.25)",
   },
+}
+
+// Sausage spine: a planar cubic bend swept around the Y axis by the coil
+// angle — the bend supplies the coil's radius, the coil wraps it into a
+// helix. coil = 0 reduces to the flat C/S-curve.
+class SpineCurve extends THREE.Curve<THREE.Vector3> {
+  constructor(
+    private len: number, private bendA: number, private bendB: number, private coil: number,
+  ) { super() }
+  getPoint(t: number, target = new THREE.Vector3()): THREE.Vector3 {
+    const mt = 1 - t
+    const bx = 3 * mt * mt * t * this.bendA + 3 * mt * t * t * this.bendB
+    const by = this.len * (
+      mt * mt * mt * -0.5 + 3 * mt * mt * t * (-1 / 6) + 3 * mt * t * t * (1 / 6) + t * t * t * 0.5
+    )
+    const phi = 2 * Math.PI * this.coil * t
+    return target.set(bx * Math.cos(phi), by, bx * Math.sin(phi))
+  }
 }
 
 const GRID_EXT = 6.4, GRID_STEP = 0.4, GRID_SUB = 8
@@ -94,7 +118,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone, dark, copies, spacing,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone, dark, copies, spacing, turntable, ortho, drill, facingTint,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -110,10 +134,12 @@ export function ThreeCube({
     cylRadius:          number
     cylHeight:          number
     tubeSilhouetteGeo:  LineSegmentsGeometry | null
-    tubeRadius:         number
+    tubeRadii:          number[]
     tubeFrameNormals:   THREE.Vector3[]
     tubeFrameBinormals: THREE.Vector3[]
     tubeFramePoints:    THREE.Vector3[]
+    tubeRings:          { mat: LineMaterial; center: THREE.Vector3; outward: THREE.Vector3; isEnd: boolean }[]
+    tubeBalls:          { geo: LineSegmentsGeometry; center: THREE.Vector3; radius: number }[]
     latheSilhouetteGeo:  LineSegmentsGeometry | null
     latheProfile:        { r: number; y: number }[]
     sphereSilhouetteGeo: LineSegmentsGeometry | null
@@ -127,8 +153,8 @@ export function ThreeCube({
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing, ortho, drill, facingTint })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing, ortho, drill, facingTint } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
@@ -136,7 +162,7 @@ export function ThreeCube({
      rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
      topView: boolean, sp: ShapeParams,
      degrees: boolean, contours: boolean, ringsN: number, cone: boolean, dk: boolean,
-     nCopies: number, gap: number) => {
+     nCopies: number, gap: number, orthoOn: boolean, drillPhase: DrillPhase) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -153,6 +179,11 @@ export function ThreeCube({
       const ctx = overlay.getContext("2d")!
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, W, H)
+
+      // Drill mode: while guessing, strip the plate down to horizon + VPs +
+      // the starting edge; on reveal, force the construction lines on.
+      const inGuess  = drillPhase === "guess"
+      const guidesOn = drillPhase === "reveal" ? true : guides && !inGuess
 
       // Project a world point to 2D screen using the live camera matrices
       const toScreen = (wx: number, wy: number, wz: number): [number, number] => {
@@ -262,7 +293,7 @@ export function ThreeCube({
       // plane. Inside it, drawings look natural; outside, perspective
       // visibly distorts. Centred on the centre of vision (CV), which
       // sits on your optical axis — not necessarily on the horizon.
-      if (cone) {
+      if (cone && !inGuess) {
         const covR = f_y * Math.tan(Math.PI / 6)
         const ccx = W / 2, ccy = H / 2
         if (covR < Math.hypot(W / 2, H / 2)) {
@@ -334,7 +365,7 @@ export function ThreeCube({
       vps.forEach(v => drawVP(v.pt, v.label))
 
       // ── construction lines (cube only) ───────────────────────────
-      if (guides && sid === "cube") {
+      if (guidesOn && sid === "cube") {
         const corners: [number, number, number][] = [
           [-hw, -hh, -hd], [hw, -hh, -hd], [hw,  hh, -hd], [-hw,  hh, -hd],
           [-hw, -hh,  hd], [hw, -hh,  hd], [hw,  hh,  hd], [-hw,  hh,  hd],
@@ -362,7 +393,7 @@ export function ThreeCube({
       // ── axis letters at the form-axis tips (cube only) ───────────
       // The axis a slider is currently rotating around lights up in red;
       // with SHOW AXES off, only that active axis appears while rotating.
-      if (sid === "cube" && (axes || liveAxis)) {
+      if (sid === "cube" && !inGuess && (axes || liveAxis)) {
         const tips: ["x" | "y" | "z", number, number, number][] = [
           ["x", hw + 0.52, 0, 0],
           ["y", 0, hh + 0.52, 0],
@@ -385,7 +416,7 @@ export function ThreeCube({
       // The "degree" of each ring is the angle between your sight line
       // and the ring's plane: 0° at eye level (a straight line), opening
       // wider the farther the ring sits above or below it.
-      if (degrees && sid !== "cube" && sid !== "tube") {
+      if (degrees && !inGuess && sid !== "cube" && sid !== "tube") {
         const rings: { y: number; r: number }[] = []
         if (sid === "cylinder") {
           const radius = sp.radius ?? 0.5, height = sp.height ?? 1.5
@@ -436,7 +467,7 @@ export function ThreeCube({
       // eye) sits below the form; the picture plane (PP) runs through
       // the form perpendicular to your gaze; rays from SP parallel to
       // the form's edges pierce the PP exactly at the vanishing points.
-      if (topView) {
+      if (topView && !inGuess) {
         const IW = 190, IH = 190
         const ix0 = 24, iy0 = H - 24 - IH
         ctx.fillStyle = pal.wash
@@ -537,7 +568,7 @@ export function ThreeCube({
               : sid === "capsule" ? (sp.radius ?? 0.45)
               : sid === "cone"    ? Math.max(sp.baseRadius ?? 0.65, sp.topRadius ?? 0)
               : sid === "egg"     ? (sp.radius ?? 0.5)
-              : (sp.radius ?? 0.15) + Math.abs(sp.bend ?? 0.7) * 0.5
+              : (sp.radius ?? 0.2) + Math.max(Math.abs(sp.bendA ?? 0.7), Math.abs(sp.bendB ?? 0.7)) * 0.5
             const [ccx2, ccy2] = P(0, wz)
             ctx.beginPath(); ctx.arc(ccx2, ccy2, fr * s, 0, Math.PI * 2); ctx.stroke()
           }
@@ -579,6 +610,15 @@ export function ThreeCube({
       ctx.fillText(`FIG_${figNo}`, 36, 27)
       ctx.globalAlpha = 1
 
+      // ── drill banner (top centre, while guessing) ────────────────
+      if (inGuess) {
+        ctx.font = "11px monospace"; ctx.fillStyle = RED; ctx.globalAlpha = 0.85
+        const t = "GUESS THE BOX — imagine the form from its edge, then reveal"
+        ctx.fillText(t, W / 2 - ctx.measureText(t).width / 2, 27)
+        ctx.globalAlpha = 1
+        return
+      }
+
       // ── title block (bottom-right, drawing-plate style) ──────────
       const posLabel =
         vertPos > 0.06  ? "ABOVE EYE LEVEL"
@@ -589,8 +629,8 @@ export function ThreeCube({
       const lensKind = lensMm < 28 ? "WIDE" : lensMm <= 60 ? "NORMAL" : "TELE"
       const rows: [string, string, string][] = [
         ["FORM", SHAPE_FULL_LABELS[sid], INK],
-        ["LENS", `${lensMm}mm ${lensKind}`, INK],
-        ["PROJ", `${nVPs}-PT PERSPECTIVE`, INK],
+        ["LENS", orthoOn ? "∞ · ORTHO" : `${lensMm}mm ${lensKind}`, INK],
+        ["PROJ", orthoOn ? "PARALLEL — VPs AT ∞" : `${nVPs}-PT PERSPECTIVE`, INK],
         ["VIEW", posLabel, RED],
       ]
       const tbW = 200, tbRow = 22, tbH = tbRow * rows.length
@@ -692,8 +732,8 @@ export function ThreeCube({
       renderer, scene, camera, controls,
       cubeGroup, shapeGroup, groundGroup, shadowMesh, gridGeo,
       cylSilhouetteGeo: null, cylRadius: 0.5, cylHeight: 1.5,
-      tubeSilhouetteGeo: null, tubeRadius: 0.15,
-      tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
+      tubeSilhouetteGeo: null, tubeRadii: [],
+      tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [], tubeRings: [], tubeBalls: [],
       latheSilhouetteGeo: null, latheProfile: [],
       sphereSilhouetteGeo: null, sphereRadius: 0.8,
       fatMats: [], copyGroups: [], copyShadows: [],
@@ -728,7 +768,7 @@ export function ThreeCube({
 
       // Recompute tube silhouette from Frenet frames each frame
       if (three.tubeSilhouetteGeo && three.tubeFramePoints.length > 0) {
-        const { tubeSilhouetteGeo, tubeFrameNormals, tubeFrameBinormals, tubeFramePoints, tubeRadius } = three
+        const { tubeSilhouetteGeo, tubeFrameNormals, tubeFrameBinormals, tubeFramePoints, tubeRadii } = three
         const TSEGS = tubeFramePoints.length - 1
         const camDir = new THREE.Vector3()
           .subVectors(camera.position, controls.target)
@@ -740,19 +780,78 @@ export function ThreeCube({
               const N = tubeFrameNormals[ti]
               const B = tubeFrameBinormals[ti]
               const P = tubeFramePoints[ti]
+              const r = tubeRadii[ti]
               const dn = N.dot(camDir)
               const db = B.dot(camDir)
               const a  = Math.atan2(-dn, db) + (side === 1 ? Math.PI : 0)
               const ca = Math.cos(a), sa = Math.sin(a)
               pos.push(
-                P.x + ca * tubeRadius * N.x + sa * tubeRadius * B.x,
-                P.y + ca * tubeRadius * N.y + sa * tubeRadius * B.y,
-                P.z + ca * tubeRadius * N.z + sa * tubeRadius * B.z,
+                P.x + ca * r * N.x + sa * r * B.x,
+                P.y + ca * r * N.y + sa * r * B.y,
+                P.z + ca * r * N.z + sa * r * B.z,
               )
             }
           }
         }
         tubeSilhouetteGeo.setPositions(pos)
+      }
+
+      // Recolor tube rings by facing: a ring whose +tangent side points at
+      // the camera opens toward you (accent); the rest open away (ink). The
+      // colour flip travels along the spine as the tube bends past your
+      // sight line — exactly the read the contour drill trains.
+      if (three.tubeRings.length > 0) {
+        const live = liveRef.current
+        const pal  = PLATE_PALETTES[live.dark ? "dark" : "light"]
+        const toCam = new THREE.Vector3()
+        for (const ring of three.tubeRings) {
+          toCam.set(
+            camera.position.x - ring.center.x,
+            camera.position.y - (ring.center.y + live.verticalPosition),
+            camera.position.z - ring.center.z,
+          )
+          const facing = live.facingTint && ring.outward.dot(toCam) > 0
+          ring.mat.color.set(facing ? pal.orange : pal.ink)
+          ring.mat.opacity = ring.isEnd ? 0.95
+            : !live.facingTint ? 0.5
+            : facing ? 0.85 : 0.4
+        }
+      }
+
+      // Tip circles: a ball end's silhouette is a circle from every angle —
+      // billboard each one to the camera every frame.
+      if (three.tubeBalls.length > 0) {
+        const vp = liveRef.current.verticalPosition
+        const camDir = new THREE.Vector3()
+        const right  = new THREE.Vector3()
+        const up     = new THREE.Vector3()
+        const BSEGS  = 48
+        for (const ball of three.tubeBalls) {
+          camDir.set(
+            camera.position.x - ball.center.x,
+            camera.position.y - (ball.center.y + vp),
+            camera.position.z - ball.center.z,
+          ).normalize()
+          const worldUp = Math.abs(camDir.y) < 0.99
+            ? new THREE.Vector3(0, 1, 0)
+            : new THREE.Vector3(1, 0, 0)
+          right.crossVectors(worldUp, camDir).normalize()
+          up.crossVectors(camDir, right)
+          const pos: number[] = []
+          for (let i = 0; i < BSEGS; i++) {
+            const a1 = 2 * Math.PI * i / BSEGS
+            const a2 = 2 * Math.PI * (i + 1) / BSEGS
+            pos.push(
+              ball.center.x + ball.radius * (Math.cos(a1) * right.x + Math.sin(a1) * up.x),
+              ball.center.y + ball.radius * (Math.cos(a1) * right.y + Math.sin(a1) * up.y),
+              ball.center.z + ball.radius * (Math.cos(a1) * right.z + Math.sin(a1) * up.z),
+              ball.center.x + ball.radius * (Math.cos(a2) * right.x + Math.sin(a2) * up.x),
+              ball.center.y + ball.radius * (Math.cos(a2) * right.y + Math.sin(a2) * up.y),
+              ball.center.z + ball.radius * (Math.cos(a2) * right.z + Math.sin(a2) * up.z),
+            )
+          }
+          ball.geo.setPositions(pos)
+        }
       }
 
       // Recompute lathe (surface of revolution) silhouette from camera azimuth
@@ -802,11 +901,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone, dark, copies, spacing, ortho, drill } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone, dark, copies, spacing)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone, dark, copies, spacing, ortho, drill)
     }
     animate()
 
@@ -870,6 +969,14 @@ export function ThreeCube({
     controls.update()
   }, [focalLength])
 
+  // ── Turntable: slow auto-orbit — watch the VPs slide along the horizon ──
+  useEffect(() => {
+    const three = threeRef.current
+    if (!three) return
+    three.controls.autoRotate = turntable
+    three.controls.autoRotateSpeed = 0.8
+  }, [turntable])
+
   // ── Zoom buttons: dolly toward/away from the target, clamped ─────
   useEffect(() => {
     const three = threeRef.current
@@ -920,6 +1027,8 @@ export function ThreeCube({
     }
     three.fatMats.forEach(m => m.dispose())
     three.fatMats = []
+    three.tubeRings = []
+    three.tubeBalls = []
 
     // ── Line-weight hierarchy, like a drawn plate ─────────────────────
     // silhouette 2.2px > cube edges 2px > end rings 1.7px > contour
@@ -969,6 +1078,27 @@ export function ThreeCube({
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
+
+      if (drill === "guess") {
+        // Drill: hide the box — draw only the starting edge, the vertical
+        // edge nearest the eye, the classic first stroke of a 2-pt cube.
+        const cam = three.camera.position
+        const rot = new THREE.Euler(
+          rotationDeg.x * Math.PI / 180,
+          rotationDeg.y * Math.PI / 180,
+          rotationDeg.z * Math.PI / 180,
+          "YXZ",
+        )
+        let bx = 1, bz = 1, bestD = Infinity
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          const p = new THREE.Vector3(sx * hw, 0, sz * hd).applyEuler(rot)
+          p.y += verticalPosition
+          const d = p.distanceTo(cam)
+          if (d < bestD) { bestD = d; bx = sx; bz = sz }
+        }
+        const edgeGeo = segGeo([bx * hw, -hh, bz * hd, bx * hw, hh, bz * hd])
+        cubeGroup.add(fatLine(edgeGeo, { width: EDGE_W }))
+      } else {
 
       const geo   = new THREE.BoxGeometry(hw * 2, hh * 2, hd * 2)
       const edges = new THREE.EdgesGeometry(geo)
@@ -1022,6 +1152,7 @@ export function ThreeCube({
         line.renderOrder = active ? 4 : 2
         cubeGroup.add(line)
       })
+      }
 
       cubeGroup.visible    = true
       cubeGroup.position.y = verticalPosition
@@ -1048,100 +1179,157 @@ export function ThreeCube({
       three.latheProfile        = []
       three.sphereSilhouetteGeo = null
 
-      const radius = shapeParams.radius ?? 0.15
-      const length = shapeParams.length ?? 2.0
-      const bend   = shapeParams.bend   ?? 0.7
+      const radius = shapeParams.radius ?? 0.2
+      const taper  = shapeParams.taper  ?? 0.35
+      const length = shapeParams.length ?? 2.2
+      const bendA  = shapeParams.bendA  ?? 0.7
+      const bendB  = shapeParams.bendB  ?? 0.7
+      const coil   = shapeParams.coil   ?? 0
 
-      const TSEGS = 32
+      const TSEGS = 96
       const RSEGS = 48
+      const BSEGS = 48
 
-      const path = new THREE.QuadraticBezierCurve3(
-        new THREE.Vector3(0, -length / 2, 0),
-        new THREE.Vector3(bend, 0, 0),
-        new THREE.Vector3(0,  length / 2, 0),
-      )
+      // Sausage radius profile: full at the waist, tapering to both ends
+      const rAt = (u: number) => radius * (1 - taper * (2 * u - 1) * (2 * u - 1))
+
+      const path = new SpineCurve(length, bendA, bendB, coil)
 
       // Precompute Frenet frames — stored for per-frame silhouette recomputation
       const frenetFrames = path.computeFrenetFrames(TSEGS, false)
       const framePoints: THREE.Vector3[] = []
-      for (let i = 0; i <= TSEGS; i++) framePoints.push(path.getPointAt(i / TSEGS))
+      const radii: number[] = []
+      for (let i = 0; i <= TSEGS; i++) {
+        framePoints.push(path.getPointAt(i / TSEGS))
+        radii.push(rAt(i / TSEGS))
+      }
       three.tubeFrameNormals   = frenetFrames.normals
       three.tubeFrameBinormals = frenetFrames.binormals
       three.tubeFramePoints    = framePoints
-      three.tubeRadius         = radius
+      three.tubeRadii          = radii
 
-      // Depth mask (open tube body)
-      const tubeGeo = new THREE.TubeGeometry(path, TSEGS, radius, RSEGS, false)
+      // Depth mask — hand-built tube so the radius can vary along the spine
+      const maskPos: number[] = []
+      for (let i = 0; i <= TSEGS; i++) {
+        const N = frenetFrames.normals[i], B = frenetFrames.binormals[i]
+        const P = framePoints[i], r = radii[i]
+        for (let j = 0; j < RSEGS; j++) {
+          const a = 2 * Math.PI * j / RSEGS
+          const ca = Math.cos(a), sa = Math.sin(a)
+          maskPos.push(
+            P.x + r * (ca * N.x + sa * B.x),
+            P.y + r * (ca * N.y + sa * B.y),
+            P.z + r * (ca * N.z + sa * B.z),
+          )
+        }
+      }
+      const maskIdx: number[] = []
+      for (let i = 0; i < TSEGS; i++) for (let j = 0; j < RSEGS; j++) {
+        const a = i * RSEGS + j
+        const b = i * RSEGS + (j + 1) % RSEGS
+        const c = (i + 1) * RSEGS + j
+        const d = (i + 1) * RSEGS + (j + 1) % RSEGS
+        maskIdx.push(a, b, c, b, d, c)
+      }
+      const tubeGeo = new THREE.BufferGeometry()
+      tubeGeo.setAttribute("position", new THREE.Float32BufferAttribute(maskPos, 3))
+      tubeGeo.setIndex(maskIdx)
       const depthMesh = new THREE.Mesh(tubeGeo,
-        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide }))
+        new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }))
       depthMesh.renderOrder = 0
 
-      // End cap depth masks oriented to the path tangent at each end
-      const capGeo = new THREE.CircleGeometry(radius, RSEGS)
-      const capMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.FrontSide })
-      const cap0 = new THREE.Mesh(capGeo, capMat)
-      cap0.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), frenetFrames.tangents[0].clone().negate(),
-      )
-      cap0.position.copy(framePoints[0])
-      cap0.renderOrder = 0
-      const cap1 = new THREE.Mesh(capGeo, capMat)
-      cap1.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), frenetFrames.tangents[TSEGS].clone(),
-      )
-      cap1.position.copy(framePoints[TSEGS])
-      cap1.renderOrder = 0
+      // Ball ends — a hemispherical depth mask closes each end, and a
+      // billboarded tip circle (the ball's silhouette, always a perfect
+      // circle from any angle) shows how the tip sits in space.
+      const capMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide })
+      const mkBall = (i: number, outward: THREE.Vector3) => {
+        const r = radii[i]
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), capMat)
+        dome.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), outward)
+        dome.position.copy(framePoints[i])
+        dome.renderOrder = 0
+        const circleGeo = segGeo(new Float32Array(BSEGS * 2 * 3))
+        shapeGroup.add(dome,
+          fatLine(circleGeo, { width: END_W, opacity: 0.95 }),
+          fatLine(circleGeo, { width: GHOST_W, ghost: true, dashed: false }))
+        three.tubeBalls.push({ geo: circleGeo, center: framePoints[i].clone(), radius: r })
+      }
+      mkBall(0, frenetFrames.tangents[0].clone().negate())
+      mkBall(TSEGS, frenetFrames.tangents[TSEGS].clone())
+      shapeGroup.add(depthMesh)
 
-      // Ring geometry — end rings + optional contour rings along the path
-      const endPos: number[] = []
-      const contourPos: number[] = []
-      let ringPos = endPos
-      const addRing = (t: number) => {
+      // Rings — one fat line each, so the animation loop can tint every
+      // ellipse by whether it opens toward or away from the camera.
+      const endGhostPos: number[] = []
+      const contourGhostPos: number[] = []
+      const ringPositions = (t: number): number[] => {
         const fi  = Math.min(Math.floor(t * TSEGS), TSEGS - 1)
         const ff  = t * TSEGS - fi
         const fi2 = Math.min(fi + 1, TSEGS)
         const P   = path.getPointAt(Math.min(t, 1))
         const N   = frenetFrames.normals[fi].clone().lerp(frenetFrames.normals[fi2], ff).normalize()
         const B   = frenetFrames.binormals[fi].clone().lerp(frenetFrames.binormals[fi2], ff).normalize()
+        const r   = rAt(t)
+        const pos: number[] = []
         for (let i = 0; i < RSEGS; i++) {
           const a1 = 2 * Math.PI * i / RSEGS
           const a2 = 2 * Math.PI * (i + 1) / RSEGS
-          ringPos.push(
-            P.x + radius * Math.cos(a1) * N.x + radius * Math.sin(a1) * B.x,
-            P.y + radius * Math.cos(a1) * N.y + radius * Math.sin(a1) * B.y,
-            P.z + radius * Math.cos(a1) * N.z + radius * Math.sin(a1) * B.z,
-            P.x + radius * Math.cos(a2) * N.x + radius * Math.sin(a2) * B.x,
-            P.y + radius * Math.cos(a2) * N.y + radius * Math.sin(a2) * B.y,
-            P.z + radius * Math.cos(a2) * N.z + radius * Math.sin(a2) * B.z,
+          pos.push(
+            P.x + r * Math.cos(a1) * N.x + r * Math.sin(a1) * B.x,
+            P.y + r * Math.cos(a1) * N.y + r * Math.sin(a1) * B.y,
+            P.z + r * Math.cos(a1) * N.z + r * Math.sin(a1) * B.z,
+            P.x + r * Math.cos(a2) * N.x + r * Math.sin(a2) * B.x,
+            P.y + r * Math.cos(a2) * N.y + r * Math.sin(a2) * B.y,
+            P.z + r * Math.cos(a2) * N.z + r * Math.sin(a2) * B.z,
           )
         }
+        return pos
       }
-      addRing(0); addRing(1)
+      const ringTs: { t: number; isEnd: boolean }[] = [
+        { t: 0, isEnd: true }, { t: 1, isEnd: true },
+      ]
       if (showContours) {
-        ringPos = contourPos
-        for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1))
+        for (let i = 1; i <= uRings; i++) ringTs.push({ t: i / (uRings + 1), isEnd: false })
       }
+      ringTs.forEach(({ t, isEnd }) => {
+        const pos  = ringPositions(t)
+        const line = fatLine(segGeo(pos), isEnd
+          ? { width: END_W, opacity: 0.95 }
+          : { width: CONTOUR_W, opacity: 0.5 })
+        shapeGroup.add(line)
+        // "Opens toward you" direction: along the spine for surface rings,
+        // but the START cap's visible face points against the spine.
+        const outward = path.getTangentAt(Math.min(t, 1)).clone()
+        if (t === 0) outward.negate()
+        three.tubeRings.push({
+          mat:    line.material as LineMaterial,
+          center: path.getPointAt(Math.min(t, 1)).clone(),
+          outward,
+          isEnd,
+        })
+        ;(isEnd ? endGhostPos : contourGhostPos).push(...pos)
+      })
+      shapeGroup.add(fatLine(segGeo(endGhostPos), { width: GHOST_W, ghost: true }))
+      if (wrapContours && contourGhostPos.length)
+        shapeGroup.add(fatLine(segGeo(contourGhostPos), { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
 
       // Silhouette placeholder (2 sides × TSEGS segs × 2 pts × 3 floats)
       const silhouetteGeo = segGeo(new Float32Array(2 * TSEGS * 2 * 3))
-
-      const endGeo    = segGeo(endPos)
-      const ringSolid = fatLine(endGeo, { width: END_W, opacity: 0.95 })
-      const ringGhost = fatLine(endGeo, { width: GHOST_W, ghost: true })
       const silSolid  = fatLine(silhouetteGeo, { width: SIL_W })
       const silGhost  = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
-
-      shapeGroup.add(depthMesh, cap0, cap1, ringGhost, ringSolid, silGhost, silSolid)
-      if (contourPos.length) {
-        const contourGeo = segGeo(contourPos)
-        shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, opacity: 0.5 }))
-        if (wrapContours)
-          shapeGroup.add(fatLine(contourGeo, { width: CONTOUR_W, ghost: true, dashed: false, opacity: 0.22 }))
-      }
+      shapeGroup.add(silGhost, silSolid)
       shapeGroup.position.y = verticalPosition
 
-      groundBottom = -length / 2 - radius
-      groundFoot   = radius + Math.abs(bend) * 0.6 + 0.25
+      // Ground from the actual coiled spine — lowest surface point and
+      // widest horizontal reach (the ball ends are covered by P.y − r).
+      groundBottom = Infinity
+      let foot = 0
+      for (let i = 0; i <= TSEGS; i++) {
+        groundBottom = Math.min(groundBottom, framePoints[i].y - radii[i])
+        foot = Math.max(foot, Math.hypot(framePoints[i].x, framePoints[i].z) + radii[i])
+      }
+      groundFoot = foot + 0.25
 
       three.tubeSilhouetteGeo = silhouetteGeo
 
@@ -1370,7 +1558,7 @@ export function ThreeCube({
 
     // ── Position the world-locked ground under the form ──────────────
     const { groundGroup, shadowMesh } = three
-    groundGroup.visible    = showGround
+    groundGroup.visible    = showGround && drill !== "guess"
     groundGroup.position.y = verticalPosition + groundBottom - 0.02
     shadowMesh.scale.set(groundFoot * 2, groundFoot * 2, 1)
 
@@ -1381,7 +1569,7 @@ export function ThreeCube({
     three.copyShadows.forEach(s => groundGroup.remove(s))
     three.copyGroups = []
     three.copyShadows = []
-    if (copies > 1) {
+    if (copies > 1 && drill !== "guess") {
       const source = shapeId === "cube" ? cubeGroup : shapeGroup
       for (let i = 1; i < copies; i++) {
         const g = source.clone()
@@ -1394,7 +1582,7 @@ export function ThreeCube({
         three.copyShadows.push(s)
       }
     }
-  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours, dark, copies, spacing])
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround, wrapContours, dark, copies, spacing, drill])
 
   return (
     <div
