@@ -653,6 +653,8 @@ export function ThreeCube({
         new THREE.MeshBasicMaterial({
           color: new THREE.Color("#c8d5ff"), transparent: true, opacity: 0.3,
           side: THREE.FrontSide, depthWrite: false,
+          // coplanar with the depth mask's front face — offset wins the tie
+          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
         }),
       )
       frontShade.position.z = hd
@@ -845,6 +847,8 @@ export function ThreeCube({
       const capMat = new THREE.MeshBasicMaterial({
         color: new THREE.Color("#c8d5ff"), transparent: true, opacity: 0.3,
         side: THREE.FrontSide, depthWrite: false,
+        // coplanar with the depth mask's caps — offset wins the tie
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
       })
       const capGeo    = new THREE.CircleGeometry(radius, SEGS)
       const topCap    = new THREE.Mesh(capGeo, capMat)
