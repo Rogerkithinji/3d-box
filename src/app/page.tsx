@@ -80,6 +80,7 @@ export default function Home() {
   const [rotationDeg,  setRotationDeg]  = useState({ x: 0, y: 0, z: 0 })
   const [guides,       setGuides]       = useState(true)
   const [showAxes,     setShowAxes]     = useState(true)
+  const [showGround,   setShowGround]   = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
@@ -130,6 +131,7 @@ export default function Home() {
           resetCount={resetCount}
           zoomAction={zoomAction}
           focalLength={focalLength}
+          showGround={showGround}
         />
       </div>
 
@@ -299,6 +301,7 @@ export default function Home() {
             {shapeId !== "cube" && (
               <ToggleRow label="SHOW CONTOURS" checked={showContours} onChange={setShowContours} />
             )}
+            <ToggleRow label="SHOW GROUND" checked={showGround} onChange={setShowGround} />
             <ToggleRow label="SHOW GUIDES" checked={guides} onChange={setGuides} />
             {shapeId === "cube" && (
               <ToggleRow label="SHOW AXES" checked={showAxes} onChange={setShowAxes} />

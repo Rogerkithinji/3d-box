@@ -18,6 +18,7 @@ interface Props {
   resetCount:       number
   zoomAction:       { dir: number; n: number }
   focalLength:      number
+  showGround:       boolean
 }
 
 const INK       = "#5B5BD6"
@@ -39,7 +40,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -63,6 +64,8 @@ export function ThreeCube({
     latheProfile:        { r: number; y: number }[]
     sphereSilhouetteGeo: THREE.BufferGeometry | null
     sphereRadius:        number
+    groundGroup:         THREE.Group
+    shadowMesh:          THREE.Mesh
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
@@ -368,9 +371,62 @@ export function ThreeCube({
     const shapeGroup = new THREE.Group()
     scene.add(cubeGroup, shapeGroup)
 
+    // ── World-locked ground: a level grid that fades into the paper, plus
+    // a soft contact shadow. It never tilts with the form — that contrast
+    // is the point — and it slides to stay under the form's lowest point.
+    const groundGroup = new THREE.Group()
+    const GRID_EXT = 3.2, GRID_STEP = 0.4, GRID_SUB = 8
+    const gridInk   = new THREE.Color("#7d7dd6")
+    const gridPaper = new THREE.Color("#eef0f7")
+    const gPos: number[] = []
+    const gCol: number[] = []
+    const pushVert = (x: number, z: number, main: boolean) => {
+      gPos.push(x, 0, z)
+      const t = Math.min(1, Math.hypot(x, z) / (GRID_EXT * 1.05))
+      const c = gridPaper.clone().lerp(gridInk, (1 - t * t) * (main ? 0.55 : 0.3))
+      gCol.push(c.r, c.g, c.b)
+    }
+    for (let i = -GRID_EXT / GRID_STEP; i <= GRID_EXT / GRID_STEP; i++) {
+      const k = i * GRID_STEP
+      const main = i === 0
+      for (let s = 0; s < GRID_SUB; s++) {
+        const a = -GRID_EXT + (2 * GRID_EXT * s) / GRID_SUB
+        const b = -GRID_EXT + (2 * GRID_EXT * (s + 1)) / GRID_SUB
+        pushVert(a, k, main); pushVert(b, k, main)   // line parallel to X
+        pushVert(k, a, main); pushVert(k, b, main)   // line parallel to Z
+      }
+    }
+    const gridGeo = new THREE.BufferGeometry()
+    gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(gPos, 3))
+    gridGeo.setAttribute("color",    new THREE.Float32BufferAttribute(gCol, 3))
+    const gridLines = new THREE.LineSegments(gridGeo,
+      new THREE.LineBasicMaterial({ vertexColors: true, depthWrite: false }))
+    gridLines.renderOrder = 1
+
+    const shadowCanvas = document.createElement("canvas")
+    shadowCanvas.width = shadowCanvas.height = 128
+    const sctx = shadowCanvas.getContext("2d")!
+    const grad = sctx.createRadialGradient(64, 64, 6, 64, 64, 62)
+    grad.addColorStop(0, "rgba(70, 70, 140, 0.30)")
+    grad.addColorStop(1, "rgba(70, 70, 140, 0)")
+    sctx.fillStyle = grad
+    sctx.fillRect(0, 0, 128, 128)
+    const shadowMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(shadowCanvas),
+        transparent: true, depthWrite: false,
+      }),
+    )
+    shadowMesh.rotation.x = -Math.PI / 2
+    shadowMesh.position.y = 0.002
+    shadowMesh.renderOrder = 1
+    groundGroup.add(gridLines, shadowMesh)
+    scene.add(groundGroup)
+
     threeRef.current = {
       renderer, scene, camera, controls,
-      cubeGroup, shapeGroup,
+      cubeGroup, shapeGroup, groundGroup, shadowMesh,
       cylSilhouetteGeo: null, cylRadius: 0.5, cylHeight: 1.5,
       tubeSilhouetteGeo: null, tubeRadius: 0.15,
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
@@ -557,6 +613,10 @@ export function ThreeCube({
     if (!three) return
     const { cubeGroup, shapeGroup } = three
 
+    // Lowest point and footprint radius of the form, for the ground plane
+    let groundBottom = -HALF
+    let groundFoot   = 1
+
     // Dispose both groups upfront before rebuilding whichever is active
     for (const group of [cubeGroup, shapeGroup]) {
       const toDispose: THREE.BufferGeometry[] = []
@@ -642,6 +702,15 @@ export function ThreeCube({
         rotationDeg.y * Math.PI / 180,
         rotationDeg.z * Math.PI / 180,
       )
+
+      // Ground sits under the lowest rotated corner — a tilted cube rests on it
+      let minCornerY = Infinity
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+        const p = new THREE.Vector3(sx * hw, sy * hh, sz * hd).applyEuler(cubeGroup.rotation)
+        if (p.y < minCornerY) minCornerY = p.y
+      }
+      groundBottom = minCornerY
+      groundFoot   = Math.hypot(hw, hd) * 1.3
 
     } else if (shapeId === "tube") {
       cubeGroup.visible        = false
@@ -748,6 +817,9 @@ export function ThreeCube({
       shapeGroup.add(depthMesh, cap0, cap1, ringGhost, ringSolid, silGhost, silSolid)
       shapeGroup.position.y = verticalPosition
 
+      groundBottom = -length / 2 - radius
+      groundFoot   = radius + Math.abs(bend) * 0.6 + 0.25
+
       three.tubeSilhouetteGeo = silhouetteGeo
 
     } else if (shapeId === "cylinder") {
@@ -834,6 +906,8 @@ export function ThreeCube({
       three.cylSilhouetteGeo = silhouetteGeo
       three.cylRadius        = radius
       three.cylHeight        = height
+      groundBottom = -height / 2
+      groundFoot   = radius * 1.6
 
     } else if (shapeId === "sphere") {
       cubeGroup.visible         = false
@@ -893,6 +967,8 @@ export function ThreeCube({
 
       three.sphereSilhouetteGeo = silhouetteGeo
       three.sphereRadius        = radius
+      groundBottom = -radius
+      groundFoot   = radius * 1.6
 
     } else {
       // Capsule, cone, egg — generic surface-of-revolution renderer
@@ -985,8 +1061,16 @@ export function ThreeCube({
 
       three.latheSilhouetteGeo = silhouetteGeo
       three.latheProfile        = profile
+      groundBottom = Math.min(...profile.map(p => p.y))
+      groundFoot   = Math.max(...profile.map(p => p.r)) * 1.6
     }
-  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours])
+
+    // ── Position the world-locked ground under the form ──────────────
+    const { groundGroup, shadowMesh } = three
+    groundGroup.visible    = showGround
+    groundGroup.position.y = verticalPosition + groundBottom - 0.02
+    shadowMesh.scale.set(groundFoot * 2, groundFoot * 2, 1)
+  }, [shapeId, shapeParams, uRings, verticalPosition, rotationDeg.x, rotationDeg.y, rotationDeg.z, activeAxis, showAxes, showGuides, showContours, showGround])
 
   return (
     <div
