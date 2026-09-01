@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js"
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js"
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js"
 import { ALL_SHAPE_IDS, SHAPE_FULL_LABELS, getParametricShape, type ShapeId, type ShapeParams } from "@/lib/shapes"
 
 interface Props {
@@ -54,20 +57,21 @@ export function ThreeCube({
     controls:           OrbitControls
     cubeGroup:          THREE.Group
     shapeGroup:         THREE.Group
-    cylSilhouetteGeo:   THREE.BufferGeometry | null
+    cylSilhouetteGeo:   LineSegmentsGeometry | null
     cylRadius:          number
     cylHeight:          number
-    tubeSilhouetteGeo:  THREE.BufferGeometry | null
+    tubeSilhouetteGeo:  LineSegmentsGeometry | null
     tubeRadius:         number
     tubeFrameNormals:   THREE.Vector3[]
     tubeFrameBinormals: THREE.Vector3[]
     tubeFramePoints:    THREE.Vector3[]
-    latheSilhouetteGeo:  THREE.BufferGeometry | null
+    latheSilhouetteGeo:  LineSegmentsGeometry | null
     latheProfile:        { r: number; y: number }[]
-    sphereSilhouetteGeo: THREE.BufferGeometry | null
+    sphereSilhouetteGeo: LineSegmentsGeometry | null
     sphereRadius:        number
     groundGroup:         THREE.Group
     shadowMesh:          THREE.Mesh
+    fatMats:             LineMaterial[]
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
@@ -598,6 +602,7 @@ export function ThreeCube({
       tubeFrameNormals: [], tubeFrameBinormals: [], tubeFramePoints: [],
       latheSilhouetteGeo: null, latheProfile: [],
       sphereSilhouetteGeo: null, sphereRadius: 0.8,
+      fatMats: [],
     }
 
     // Continuous animation loop — OrbitControls needs this to interpolate damping
@@ -624,7 +629,7 @@ export function ThreeCube({
             pos.push(sx, y1, sz, sx, y2, sz)
           }
         }
-        cylSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+        cylSilhouetteGeo.setPositions(pos)
       }
 
       // Recompute tube silhouette from Frenet frames each frame
@@ -653,7 +658,7 @@ export function ThreeCube({
             }
           }
         }
-        tubeSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+        tubeSilhouetteGeo.setPositions(pos)
       }
 
       // Recompute lathe (surface of revolution) silhouette from camera azimuth
@@ -669,7 +674,7 @@ export function ThreeCube({
             pos.push(r1 * cx, y1, r1 * cz, r2 * cx, y2, r2 * cz)
           }
         }
-        three.latheSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+        three.latheSilhouetteGeo.setPositions(pos)
       }
 
       // Recompute sphere silhouette — great circle perpendicular to camera direction
@@ -698,7 +703,7 @@ export function ThreeCube({
             r * Math.cos(a2) * right.z + r * Math.sin(a2) * up.z,
           )
         }
-        sphereSilhouetteGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+        sphereSilhouetteGeo.setPositions(pos)
       }
 
       renderer.render(scene, camera)
@@ -716,6 +721,7 @@ export function ThreeCube({
       renderer.setSize(w, h)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
+      threeRef.current?.fatMats.forEach(m => m.resolution.set(w, h))
     }
     const ro = new ResizeObserver(onResize)
     ro.observe(wrap)
@@ -793,6 +799,43 @@ export function ThreeCube({
       group.clear()
       toDispose.forEach(g => g.dispose())
     }
+    three.fatMats.forEach(m => m.dispose())
+    three.fatMats = []
+
+    // ── Line-weight hierarchy, like a drawn plate ─────────────────────
+    // silhouette 2.2px > cube edges 2px > end rings 1.7px > contour
+    // rings 1px at half strength (visible surface only, no ghost) >
+    // hidden lines: thin dashes.
+    const rendererSize = new THREE.Vector2()
+    three.renderer.getSize(rendererSize)
+    const segGeo = (pos: ArrayLike<number>) => {
+      const g = new LineSegmentsGeometry()
+      g.setPositions(Array.from(pos))
+      return g
+    }
+    const fatLine = (
+      geo: LineSegmentsGeometry,
+      opts: { width: number; opacity?: number; ghost?: boolean; dashed?: boolean },
+    ) => {
+      const { width, opacity = 1, ghost = false, dashed = ghost } = opts
+      const m = new LineMaterial({
+        color: INK_THREE.getHex(),
+        linewidth: width,
+        transparent: ghost || opacity < 1,
+        opacity: ghost ? 0.16 : opacity,
+        depthTest: !ghost,
+        dashed,
+        dashSize: 0.05,
+        gapSize: 0.045,
+      })
+      m.resolution.copy(rendererSize)
+      three.fatMats.push(m)
+      const line = new LineSegments2(geo, m)
+      if (dashed) line.computeLineDistances()
+      line.renderOrder = ghost ? 2 : 3
+      return line
+    }
+    const SIL_W = 2.2, EDGE_W = 2, END_W = 1.7, CONTOUR_W = 1, GHOST_W = 0.9
 
     if (shapeId === "cube") {
       shapeGroup.visible      = false
@@ -826,13 +869,10 @@ export function ThreeCube({
       frontShade.position.z = hd
       frontShade.renderOrder = 1
 
-      const cubeGhost = new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      cubeGhost.renderOrder = 2
-
-      const cubeSolid = new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      cubeSolid.renderOrder = 3
+      const edgeGeo = segGeo(edges.attributes.position.array)
+      edges.dispose()
+      const cubeSolid = fatLine(edgeGeo, { width: EDGE_W })
+      const cubeGhost = fatLine(edgeGeo, { width: GHOST_W, ghost: true })
 
       cubeGroup.add(depthMesh, frontShade, cubeGhost, cubeSolid)
 
@@ -933,7 +973,9 @@ export function ThreeCube({
       cap1.renderOrder = 0
 
       // Ring geometry — end rings + optional contour rings along the path
-      const ringPos: number[] = []
+      const endPos: number[] = []
+      const contourPos: number[] = []
+      let ringPos = endPos
       const addRing = (t: number) => {
         const fi  = Math.min(Math.floor(t * TSEGS), TSEGS - 1)
         const ff  = t * TSEGS - fi
@@ -956,33 +998,22 @@ export function ThreeCube({
       }
       addRing(0); addRing(1)
       if (showContours) {
+        ringPos = contourPos
         for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1))
       }
-      const ringGeo = new THREE.BufferGeometry()
-      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
 
       // Silhouette placeholder (2 sides × TSEGS segs × 2 pts × 3 floats)
-      const silhouetteGeo = new THREE.BufferGeometry()
-      silhouetteGeo.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(new Float32Array(2 * TSEGS * 2 * 3), 3),
-      )
+      const silhouetteGeo = segGeo(new Float32Array(2 * TSEGS * 2 * 3))
 
-      const ringGhost = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      ringGhost.renderOrder = 2
-      const ringSolid = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      ringSolid.renderOrder = 3
-
-      const silGhost = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      silGhost.renderOrder = 2
-      const silSolid = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      silSolid.renderOrder = 3
+      const endGeo    = segGeo(endPos)
+      const ringSolid = fatLine(endGeo, { width: END_W, opacity: 0.95 })
+      const ringGhost = fatLine(endGeo, { width: GHOST_W, ghost: true })
+      const silSolid  = fatLine(silhouetteGeo, { width: SIL_W })
+      const silGhost  = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
       shapeGroup.add(depthMesh, cap0, cap1, ringGhost, ringSolid, silGhost, silSolid)
+      if (contourPos.length)
+        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
       shapeGroup.position.y = verticalPosition
 
       groundBottom = -length / 2 - radius
@@ -1027,50 +1058,37 @@ export function ThreeCube({
       bottomCap.renderOrder = 1
 
       // Ring geometry (static — doesn't change with camera angle)
-      const ringPos: number[] = []
-      const addRing = (y: number) => {
+      const endPos: number[] = []
+      const contourPos: number[] = []
+      const addRing = (y: number, out: number[]) => {
         for (let i = 0; i < SEGS; i++) {
           const a1 = 2 * Math.PI * i / SEGS
           const a2 = 2 * Math.PI * (i + 1) / SEGS
-          ringPos.push(
+          out.push(
             radius * Math.cos(a1), y, radius * Math.sin(a1),
             radius * Math.cos(a2), y, radius * Math.sin(a2),
           )
         }
       }
-      addRing( height / 2)
-      addRing(-height / 2)
+      addRing( height / 2, endPos)
+      addRing(-height / 2, endPos)
       if (showContours) {
         for (let i = 1; i <= uRings; i++)
-          addRing(-height / 2 + height * i / (uRings + 1))
+          addRing(-height / 2 + height * i / (uRings + 1), contourPos)
       }
-      const ringGeo = new THREE.BufferGeometry()
-      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
 
       // Silhouette geometry — placeholder updated every frame by the animation loop
-      const silhouetteGeo = new THREE.BufferGeometry()
-      silhouetteGeo.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(new Float32Array(32 * 2 * 2 * 3), 3),
-      )
+      const silhouetteGeo = segGeo(new Float32Array(32 * 2 * 2 * 3))
 
-      const ringGhost = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      ringGhost.renderOrder = 2
-
-      const ringSolid = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      ringSolid.renderOrder = 3
-
-      const silGhost = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      silGhost.renderOrder = 2
-
-      const silSolid = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      silSolid.renderOrder = 3
+      const endGeo    = segGeo(endPos)
+      const ringSolid = fatLine(endGeo, { width: END_W, opacity: 0.95 })
+      const ringGhost = fatLine(endGeo, { width: GHOST_W, ghost: true })
+      const silSolid  = fatLine(silhouetteGeo, { width: SIL_W })
+      const silGhost  = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
       shapeGroup.add(depthMask, topCap, bottomCap, ringGhost, ringSolid, silGhost, silSolid)
+      if (contourPos.length)
+        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
       shapeGroup.position.y = verticalPosition
 
       three.cylSilhouetteGeo = silhouetteGeo
@@ -1109,30 +1127,15 @@ export function ThreeCube({
           }
         }
       }
-      const ringGeo = new THREE.BufferGeometry()
-      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
-
       // Silhouette great circle placeholder — SEGS segments × 2 pts × 3 floats
-      const silhouetteGeo = new THREE.BufferGeometry()
-      silhouetteGeo.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(new Float32Array(SEGS * 2 * 3), 3),
-      )
+      const silhouetteGeo = segGeo(new Float32Array(SEGS * 2 * 3))
 
-      const ringGhost = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      ringGhost.renderOrder = 2
-      const ringSolid = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      ringSolid.renderOrder = 3
-      const silGhost = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      silGhost.renderOrder = 2
-      const silSolid = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      silSolid.renderOrder = 3
+      const silSolid = fatLine(silhouetteGeo, { width: SIL_W })
+      const silGhost = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
-      shapeGroup.add(depthMesh, ringGhost, ringSolid, silGhost, silSolid)
+      shapeGroup.add(depthMesh, silGhost, silSolid)
+      if (ringPos.length)
+        shapeGroup.add(fatLine(segGeo(ringPos), { width: CONTOUR_W, opacity: 0.5 }))
       shapeGroup.position.y = verticalPosition
 
       three.sphereSilhouetteGeo = silhouetteGeo
@@ -1187,46 +1190,40 @@ export function ThreeCube({
       }
 
       // Ring geometry — end rings + contour rings
-      const ringPos: number[] = []
-      const addRing = (u: number) => {
+      const endPos: number[] = []
+      const contourPos: number[] = []
+      const addRing = (u: number, out: number[]) => {
         const [x, y] = shapeDef.surface(Math.min(u, 1), 0, shapeParams)
         const r = Math.max(0, x)
         if (r < 0.001) return
         for (let i = 0; i < RSEGS; i++) {
           const a1 = 2 * Math.PI * i / RSEGS
           const a2 = 2 * Math.PI * (i + 1) / RSEGS
-          ringPos.push(r * Math.cos(a1), y, r * Math.sin(a1), r * Math.cos(a2), y, r * Math.sin(a2))
+          out.push(r * Math.cos(a1), y, r * Math.sin(a1), r * Math.cos(a2), y, r * Math.sin(a2))
         }
       }
-      if (r0 > 0.001) addRing(0)
-      if (rN > 0.001) addRing(1)
+      if (r0 > 0.001) addRing(0, endPos)
+      if (rN > 0.001) addRing(1, endPos)
       if (showContours) {
-        for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1))
+        for (let i = 1; i <= uRings; i++) addRing(i / (uRings + 1), contourPos)
       }
-      const ringGeo = new THREE.BufferGeometry()
-      ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(ringPos, 3))
 
       // Silhouette placeholder — 2 sides × USAMPLES segments × 2 pts × 3 floats
-      const silhouetteGeo = new THREE.BufferGeometry()
-      silhouetteGeo.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(new Float32Array(2 * USAMPLES * 2 * 3), 3),
-      )
+      const silhouetteGeo = segGeo(new Float32Array(2 * USAMPLES * 2 * 3))
 
-      const ringGhost = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      ringGhost.renderOrder = 2
-      const ringSolid = new THREE.LineSegments(ringGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      ringSolid.renderOrder = 3
-      const silGhost = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, transparent: true, opacity: 0.2, depthTest: false }))
-      silGhost.renderOrder = 2
-      const silSolid = new THREE.LineSegments(silhouetteGeo,
-        new THREE.LineBasicMaterial({ color: INK_THREE, depthTest: true }))
-      silSolid.renderOrder = 3
+      const silSolid = fatLine(silhouetteGeo, { width: SIL_W })
+      const silGhost = fatLine(silhouetteGeo, { width: GHOST_W, ghost: true, dashed: false })
 
-      shapeGroup.add(ringGhost, ringSolid, silGhost, silSolid)
+      shapeGroup.add(silGhost, silSolid)
+      if (endPos.length) {
+        const endGeo = segGeo(endPos)
+        shapeGroup.add(
+          fatLine(endGeo, { width: END_W, opacity: 0.95 }),
+          fatLine(endGeo, { width: GHOST_W, ghost: true }),
+        )
+      }
+      if (contourPos.length)
+        shapeGroup.add(fatLine(segGeo(contourPos), { width: CONTOUR_W, opacity: 0.5 }))
       shapeGroup.position.y = verticalPosition
 
       three.latheSilhouetteGeo = silhouetteGeo
