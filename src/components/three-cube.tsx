@@ -17,6 +17,7 @@ interface Props {
   showContours:     boolean
   resetCount:       number
   zoomAction:       { dir: number; n: number }
+  focalLength:      number
 }
 
 const INK       = "#5B5BD6"
@@ -30,10 +31,15 @@ const HALF      = 0.55
 const HOME_CAM: [number, number, number] = [2.3, 1.15, 4.3]
 // RESET VIEW target — face to face with the form, at eye level
 const FACE_CAM: [number, number, number] = [0, 0, 5]
+// Focal lengths are full-frame 35mm equivalents: fov = 2·atan(12 / f)
+const SENSOR_HALF   = 12
+const BASE_FOCAL_MM = 30   // the lens the zoom clamps are calibrated for
+const BASE_MIN_DIST = 1.2
+const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -292,8 +298,11 @@ export function ThreeCube({
         : vertPos < -0.06 ? "BELOW EYE LEVEL"
         : "AT EYE LEVEL"
       const nVPs = vps.filter(v => v.pt).length
+      const lensMm = Math.round(SENSOR_HALF / Math.tan(vFOV / 2))
+      const lensKind = lensMm < 28 ? "WIDE" : lensMm <= 60 ? "NORMAL" : "TELE"
       const rows: [string, string, string][] = [
         ["FORM", SHAPE_FULL_LABELS[sid], INK],
+        ["LENS", `${lensMm}mm ${lensKind}`, INK],
         ["PROJ", `${nVPs}-PT PERSPECTIVE`, INK],
         ["VIEW", posLabel, RED],
       ]
@@ -498,6 +507,26 @@ export function ThreeCube({
       threeRef.current = null
     }
   }, [drawOverlay])
+
+  // ── Focal length: set the FOV and dolly-compensate the distance so
+  // the form keeps its apparent size — only the convergence changes ──
+  useEffect(() => {
+    const three = threeRef.current
+    if (!three) return
+    const { camera, controls } = three
+    const newFov = 2 * Math.atan(SENSOR_HALF / focalLength) * 180 / Math.PI
+    if (Math.abs(newFov - camera.fov) < 1e-3) return
+    const k = Math.tan(camera.fov * Math.PI / 360) / Math.tan(newFov * Math.PI / 360)
+    const offset = camera.position.clone().sub(controls.target)
+    camera.position.copy(controls.target).addScaledVector(offset, k)
+    camera.fov = newFov
+    camera.updateProjectionMatrix()
+    // keep the zoom limits in apparent-size space so long lenses can stand back
+    const clampScale = focalLength / BASE_FOCAL_MM
+    controls.minDistance = BASE_MIN_DIST * clampScale
+    controls.maxDistance = BASE_MAX_DIST * clampScale
+    controls.update()
+  }, [focalLength])
 
   // ── Zoom buttons: dolly toward/away from the target, clamped ─────
   useEffect(() => {

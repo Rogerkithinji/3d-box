@@ -82,6 +82,7 @@ export default function Home() {
   const [showAxes,     setShowAxes]     = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
+  const [focalLength,  setFocalLength]  = useState(30)
   const [activeAxis,   setActiveAxis]   = useState<"x" | "y" | "z" | null>(null)
 
   // Highlight the axis being rotated; fade it out shortly after the last change
@@ -128,6 +129,7 @@ export default function Home() {
           showContours={showContours}
           resetCount={resetCount}
           zoomAction={zoomAction}
+          focalLength={focalLength}
         />
       </div>
 
@@ -212,6 +214,21 @@ export default function Home() {
         {/* 03 · View */}
         <section className="flex flex-col gap-4">
           <SectionHeader n="03" title="VIEW" />
+
+          <ControlRow label="FOCAL LENGTH" valueText={`${focalLength}mm`}>
+            <Slider
+              min={20} max={135} step={1}
+              value={focalLength}
+              onValueChange={(v) => setFocalLength(v as number)}
+            />
+            <p className="font-mono text-[11px]" style={{ color: `${INK}99` }}>
+              {focalLength < 28
+                ? "wide angle — VPs pull close, drama up"
+                : focalLength <= 60
+                ? "normal lens — close to human vision"
+                : "telephoto — VPs fly apart, space flattens"}
+            </p>
+          </ControlRow>
 
           {shapeId === "cube" && (
             <>
@@ -303,6 +320,7 @@ export default function Home() {
           <button
             onClick={() => {
               setRotationDeg({ x: 0, y: 0, z: 0 })
+              setFocalLength(30)
               setResetCount(c => c + 1)
             }}
             className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 hover:bg-[#F0954F] hover:text-[#33338A]"
