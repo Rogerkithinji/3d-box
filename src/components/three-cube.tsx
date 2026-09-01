@@ -19,6 +19,7 @@ interface Props {
   zoomAction:       { dir: number; n: number }
   focalLength:      number
   showGround:       boolean
+  showTopView:      boolean
 }
 
 const INK       = "#5B5BD6"
@@ -40,7 +41,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -69,13 +70,14 @@ export function ThreeCube({
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
     (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
-     rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null) => {
+     rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
+     topView: boolean, sp: ShapeParams) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -274,6 +276,118 @@ export function ThreeCube({
           ctx.globalAlpha = active ? 1 : 0.75
           ctx.fillText(axis.toUpperCase(), sx - 3.5, sy + 4)
         })
+        ctx.globalAlpha = 1
+      }
+
+      // ── top view inset: the textbook VP construction, live ───────
+      // Seen from above, oriented view-up: the station point (SP, your
+      // eye) sits below the form; the picture plane (PP) runs through
+      // the form perpendicular to your gaze; rays from SP parallel to
+      // the form's edges pierce the PP exactly at the vanishing points.
+      if (topView) {
+        const IW = 190, IH = 190
+        const ix0 = 24, iy0 = H - 24 - IH
+        ctx.fillStyle = "rgba(255,255,255,0.6)"
+        ctx.fillRect(ix0, iy0, IW, IH)
+        ctx.strokeStyle = INK; ctx.globalAlpha = 0.55; ctx.lineWidth = 1
+        ctx.strokeRect(ix0 + 0.5, iy0 + 0.5, IW, IH)
+        ctx.globalAlpha = 1
+
+        const camX = camera.position.x, camZ = camera.position.z
+        const d  = Math.hypot(camX, camZ) || 1e-4
+        const fw = { x: -camX / d, z: -camZ / d }   // SP → form (view forward)
+        const rt = { x: -fw.z,     z: fw.x }        // view right
+        const s  = Math.min(34, 100 / d)            // SP stays a fixed step below the form
+        const ox = ix0 + IW / 2
+        const oy = iy0 + IH * 0.38
+        const P = (wx: number, wz: number): [number, number] => [
+          ox + (wx * rt.x + wz * rt.z) * s,
+          oy - (wx * fw.x + wz * fw.z) * s,
+        ]
+        const [spx, spy] = P(camX, camZ)
+
+        ctx.save()
+        ctx.beginPath(); ctx.rect(ix0, iy0, IW, IH); ctx.clip()
+
+        // picture plane — horizontal through the form in view-up orientation
+        ctx.strokeStyle = RED; ctx.globalAlpha = 0.6; ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(ix0, oy); ctx.lineTo(ix0 + IW, oy); ctx.stroke()
+
+        // field of view wedge for the current lens
+        const hHalf = Math.atan(Math.tan(vFOV / 2) * camera.aspect)
+        ctx.globalAlpha = 0.45
+        for (const a of [-hHalf, hHalf]) {
+          const dx = fw.x * Math.cos(a) - fw.z * Math.sin(a)
+          const dz = fw.x * Math.sin(a) + fw.z * Math.cos(a)
+          const [ex, ey] = P(camX + dx * (d + 9), camZ + dz * (d + 9))
+          ctx.beginPath(); ctx.moveTo(spx, spy); ctx.lineTo(ex, ey); ctx.stroke()
+        }
+
+        // rays parallel to the form's edge families → VPs on the PP
+        const famDirs = sid === "cube"
+          ? [new THREE.Vector3(1, 0, 0).applyEuler(eul), new THREE.Vector3(0, 0, 1).applyEuler(eul)]
+          : [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1)]
+        ctx.setLineDash([4, 4])
+        famDirs.forEach(v => {
+          let hx = v.x, hz = v.z
+          const n = Math.hypot(hx, hz)
+          if (n < 0.03) return
+          hx /= n; hz /= n
+          let fdot = hx * fw.x + hz * fw.z
+          if (fdot < 0) { hx = -hx; hz = -hz; fdot = -fdot }
+          if (fdot < 0.03) return                    // parallel to PP — VP at infinity
+          const t = d / fdot
+          const [vx2, vy2] = P(camX + hx * t, camZ + hz * t)
+          ctx.strokeStyle = RED; ctx.globalAlpha = 0.5; ctx.lineWidth = 0.9
+          ctx.beginPath(); ctx.moveTo(spx, spy); ctx.lineTo(vx2, vy2); ctx.stroke()
+          ctx.setLineDash([])
+          ctx.globalAlpha = 0.85; ctx.lineWidth = 1.4
+          ctx.beginPath()
+          ctx.moveTo(vx2 - 4, vy2); ctx.lineTo(vx2 + 4, vy2)
+          ctx.moveTo(vx2, vy2 - 4); ctx.lineTo(vx2, vy2 + 4)
+          ctx.stroke()
+          ctx.setLineDash([4, 4])
+        })
+        ctx.setLineDash([])
+
+        // form footprint
+        ctx.strokeStyle = INK; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.1
+        if (sid === "cube") {
+          for (const sy of [-1, 1]) {
+            ctx.beginPath()
+            for (let i = 0; i <= 4; i++) {
+              const sx = [1, 1, -1, -1][i % 4], sz = [1, -1, -1, 1][i % 4]
+              const c = new THREE.Vector3(sx * hw, sy * hh, sz * hd).applyEuler(eul)
+              const [px, py] = P(c.x, c.z)
+              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            ctx.stroke()
+          }
+        } else {
+          const fr =
+            sid === "cylinder" ? (sp.radius ?? 0.5)
+            : sid === "sphere"  ? (sp.radius ?? 0.8)
+            : sid === "capsule" ? (sp.radius ?? 0.45)
+            : sid === "cone"    ? Math.max(sp.baseRadius ?? 0.65, sp.topRadius ?? 0)
+            : sid === "egg"     ? (sp.radius ?? 0.5)
+            : (sp.radius ?? 0.15) + Math.abs(sp.bend ?? 0.7) * 0.5
+          ctx.beginPath(); ctx.arc(ox, oy, fr * s, 0, Math.PI * 2); ctx.stroke()
+        }
+
+        // station point
+        ctx.fillStyle = RED; ctx.globalAlpha = 0.9
+        ctx.beginPath(); ctx.arc(spx, spy, 3, 0, Math.PI * 2); ctx.fill()
+        ctx.font = "10px monospace"
+        ctx.fillText("SP", spx + 7, spy + 3)
+        ctx.globalAlpha = 1
+        ctx.restore()
+
+        // labels on the frame
+        ctx.font = "10px monospace"
+        ctx.fillStyle = INK; ctx.globalAlpha = 0.7
+        ctx.fillText("TOP VIEW", ix0 + 8, iy0 + 14)
+        ctx.fillStyle = RED
+        ctx.fillText("PP", ix0 + IW - 22, oy - 5)
         ctx.globalAlpha = 1
       }
 
@@ -537,11 +651,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams)
     }
     animate()
 

@@ -81,6 +81,7 @@ export default function Home() {
   const [guides,       setGuides]       = useState(true)
   const [showAxes,     setShowAxes]     = useState(true)
   const [showGround,   setShowGround]   = useState(true)
+  const [showTopView,  setShowTopView]  = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
@@ -132,6 +133,7 @@ export default function Home() {
           zoomAction={zoomAction}
           focalLength={focalLength}
           showGround={showGround}
+          showTopView={showTopView}
         />
       </div>
 
@@ -306,6 +308,7 @@ export default function Home() {
             {shapeId === "cube" && (
               <ToggleRow label="SHOW AXES" checked={showAxes} onChange={setShowAxes} />
             )}
+            <ToggleRow label="SHOW TOP VIEW" checked={showTopView} onChange={setShowTopView} />
           </div>
 
           <div className="mt-1 flex gap-1.5">
