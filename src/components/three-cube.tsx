@@ -25,6 +25,7 @@ interface Props {
   showTopView:      boolean
   showDegrees:      boolean
   wrapContours:     boolean
+  showCone:         boolean
 }
 
 const INK       = "#5B5BD6"
@@ -46,7 +47,7 @@ const BASE_MAX_DIST = 10
 
 export function ThreeCube({
   shapeId, shapeParams, uRings,
-  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours,
+  verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, showContours, resetCount, zoomAction, focalLength, showGround, showTopView, showDegrees, wrapContours, showCone,
 }: Props) {
   const wrapRef    = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -76,15 +77,15 @@ export function ThreeCube({
   } | null>(null)
 
   // Latest prop values for the animation loop to read each frame
-  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings })
-  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings } })
+  const liveRef = useRef({ verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone })
+  useEffect(() => { liveRef.current = { verticalPosition, rotationDeg, activeAxis, showAxes, shapeId, shapeParams, showGuides, showTopView, showDegrees, showContours, uRings, showCone } })
 
   // ── 2D overlay ────────────────────────────────────────────────────
   const drawOverlay = useCallback(
     (vertPos: number, guides: boolean, axes: boolean, sid: ShapeId, hw: number, hh: number, hd: number,
      rotDeg: { x: number; y: number; z: number }, liveAxis: "x" | "y" | "z" | null,
      topView: boolean, sp: ShapeParams,
-     degrees: boolean, contours: boolean, ringsN: number) => {
+     degrees: boolean, contours: boolean, ringsN: number, cone: boolean) => {
       const overlay = overlayRef.current
       const three   = threeRef.current
       if (!overlay || !three) return
@@ -200,6 +201,46 @@ export function ThreeCube({
             ctx.globalAlpha = 1
           }
         }
+      }
+
+      // ── cone of vision (60°) ─────────────────────────────────────
+      // The circle where a 60° cone around your gaze meets the picture
+      // plane. Inside it, drawings look natural; outside, perspective
+      // visibly distorts. Centred on the centre of vision (CV), which
+      // sits on your optical axis — not necessarily on the horizon.
+      if (cone) {
+        const covR = f_y * Math.tan(Math.PI / 6)
+        const ccx = W / 2, ccy = H / 2
+        if (covR < Math.hypot(W / 2, H / 2)) {
+          // whisper wash over the distortion zone
+          ctx.save()
+          ctx.fillStyle = "rgba(196,85,59,0.035)"
+          ctx.beginPath()
+          ctx.rect(0, 0, W, H)
+          ctx.arc(ccx, ccy, covR, 0, Math.PI * 2)
+          ctx.fill("evenodd")
+          ctx.restore()
+          ctx.strokeStyle = RED; ctx.globalAlpha = 0.45; ctx.lineWidth = 1
+          ctx.setLineDash([9, 6])
+          ctx.beginPath(); ctx.arc(ccx, ccy, covR, 0, Math.PI * 2); ctx.stroke()
+          ctx.setLineDash([])
+          const ly = ccy - covR
+          if (ly > 26 && ly < H - 26) {
+            ctx.font = "11px monospace"; ctx.fillStyle = RED; ctx.globalAlpha = 0.75
+            const t = "CONE OF VISION · 60°"
+            ctx.fillText(t, ccx - ctx.measureText(t).width / 2, ly + 16)
+          }
+          ctx.globalAlpha = 1
+        }
+        // centre of vision cross
+        ctx.strokeStyle = RED; ctx.globalAlpha = 0.6; ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(ccx - 5, ccy); ctx.lineTo(ccx + 5, ccy)
+        ctx.moveTo(ccx, ccy - 5); ctx.lineTo(ccx, ccy + 5)
+        ctx.stroke()
+        ctx.font = "10px monospace"; ctx.fillStyle = RED
+        ctx.fillText("CV", ccx - 24, ccy + 13)
+        ctx.globalAlpha = 1
       }
 
       // ── VP markers ───────────────────────────────────────────────
@@ -378,6 +419,18 @@ export function ThreeCube({
           const dz = fw.x * Math.sin(a) + fw.z * Math.cos(a)
           const [ex, ey] = P(camX + dx * (d + 9), camZ + dz * (d + 9))
           ctx.beginPath(); ctx.moveTo(spx, spy); ctx.lineTo(ex, ey); ctx.stroke()
+        }
+
+        // fixed 60° cone of vision for comparison against the lens wedge
+        if (cone) {
+          ctx.setLineDash([4, 4]); ctx.globalAlpha = 0.4
+          for (const a of [-Math.PI / 6, Math.PI / 6]) {
+            const dx = fw.x * Math.cos(a) - fw.z * Math.sin(a)
+            const dz = fw.x * Math.sin(a) + fw.z * Math.cos(a)
+            const [ex, ey] = P(camX + dx * (d + 9), camZ + dz * (d + 9))
+            ctx.beginPath(); ctx.moveTo(spx, spy); ctx.lineTo(ex, ey); ctx.stroke()
+          }
+          ctx.setLineDash([]); ctx.globalAlpha = 0.45
         }
 
         // rays parallel to the form's edge families → VPs on the PP
@@ -709,11 +762,11 @@ export function ThreeCube({
 
       renderer.render(scene, camera)
 
-      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings } = liveRef.current
+      const { verticalPosition, rotationDeg, activeAxis, showAxes, showGuides, shapeId, shapeParams, showTopView, showDegrees, showContours, uRings, showCone } = liveRef.current
       const hw = (shapeParams.width  ?? HALF * 2) / 2
       const hh = (shapeParams.height ?? HALF * 2) / 2
       const hd = (shapeParams.depth  ?? HALF * 2) / 2
-      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings)
+      drawOverlay(verticalPosition, showGuides, showAxes, shapeId, hw, hh, hd, rotationDeg, activeAxis, showTopView, shapeParams, showDegrees, showContours, uRings, showCone)
     }
     animate()
 

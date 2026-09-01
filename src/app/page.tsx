@@ -84,6 +84,7 @@ export default function Home() {
   const [showTopView,  setShowTopView]  = useState(true)
   const [showDegrees,  setShowDegrees]  = useState(true)
   const [wrapContours, setWrapContours] = useState(true)
+  const [showCone,     setShowCone]     = useState(true)
   const [resetCount,   setResetCount]   = useState(0)
   const [zoomAction,   setZoomAction]   = useState({ dir: 1, n: 0 })
   const [focalLength,  setFocalLength]  = useState(30)
@@ -138,6 +139,7 @@ export default function Home() {
           showTopView={showTopView}
           showDegrees={showDegrees}
           wrapContours={wrapContours}
+          showCone={showCone}
         />
       </div>
 
@@ -319,6 +321,7 @@ export default function Home() {
               <ToggleRow label="SHOW AXES" checked={showAxes} onChange={setShowAxes} />
             )}
             <ToggleRow label="SHOW TOP VIEW" checked={showTopView} onChange={setShowTopView} />
+            <ToggleRow label="CONE OF VISION" checked={showCone} onChange={setShowCone} />
           </div>
 
           <div className="mt-1 flex gap-1.5">
