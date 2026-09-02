@@ -171,6 +171,27 @@
   background: rgba(143, 143, 232, 0.3);
 }
 
+/* Small icon buttons: a real hit area with a wash on hover, no motion */
+.icon-button {
+  border-radius: 9999px;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.icon-button:hover {
+  background: color-mix(in srgb, var(--ink) 14%, var(--panel));
+  opacity: 1;
+}
+.dark-plate .icon-button:hover {
+  background: color-mix(in srgb, var(--ink) 24%, var(--panel));
+}
+
+/* Shape tile hover: an ink wash over the panel — its own blue per theme */
+.shape-tile:hover {
+  background: color-mix(in srgb, var(--ink) 14%, var(--panel));
+}
+.dark-plate .shape-tile:hover {
+  background: color-mix(in srgb, var(--ink) 24%, var(--panel));
+}
+
 /* Toggle switch hover: the track fills toward its flipped state */
 .ink-panel [data-slot="switch"] {
   transition: background-color 0.18s ease;
