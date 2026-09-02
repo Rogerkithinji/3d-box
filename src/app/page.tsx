@@ -34,8 +34,8 @@ const SHAPE_ICONS: Record<ShapeId, LucideIcon> = {
 function SectionHeader({ n, title }: { n: string; title: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="font-mono text-[10px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>{n}</span>
-      <span className="font-mono text-[11px] tracking-[0.22em]" style={{ color: INK_DEEP }}>{title}</span>
+      <span className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>{n}</span>
+      <span className="font-mono text-[12px] tracking-[0.22em]" style={{ color: INK_DEEP }}>{title}</span>
       <div className="flex-1 border-t" style={{ borderColor: "color-mix(in srgb, var(--ink) 17%, transparent)" }} />
     </div>
   )
@@ -47,10 +47,10 @@ function ControlRow({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between">
-        <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
+        <Label className="font-mono text-[12px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
           {label}
         </Label>
-        <span className="font-mono text-[11px] tabular-nums" style={{ color: INK }}>
+        <span className="font-mono text-[12px] tabular-nums" style={{ color: INK }}>
           {valueText}
         </span>
       </div>
@@ -64,11 +64,39 @@ function ToggleRow({
 }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="flex items-center justify-between">
-      <Label className="font-mono text-[11px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
+      <Label className="font-mono text-[12px] tracking-[0.14em]" style={{ color: "color-mix(in srgb, var(--ink-deep) 80%, transparent)" }}>
         {label}
       </Label>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
+  )
+}
+
+// Compact visibility flag for the LAYERS palette — the diamond lights
+// orange when the layer is on, like a plotted layer tick.
+function LayerChip({
+  label, checked, onChange,
+}: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!checked)}
+      className="shape-tile flex items-center gap-2 border px-2.5 py-1.5 font-mono text-[11px] tracking-[0.14em] transition-colors duration-150"
+      style={{
+        borderColor: checked
+          ? "color-mix(in srgb, var(--ink) 45%, transparent)"
+          : "color-mix(in srgb, var(--ink) 15%, transparent)",
+        color: checked ? INK_DEEP : "color-mix(in srgb, var(--ink) 45%, transparent)",
+      }}
+    >
+      <span
+        className="size-1.5 flex-none rotate-45 border"
+        style={{
+          borderColor: checked ? ORANGE_DEEP : "currentColor",
+          background: checked ? ORANGE : undefined,
+        }}
+      />
+      {label}
+    </button>
   )
 }
 
@@ -235,14 +263,14 @@ export default function Home() {
       >
         {/* Plate header */}
         <header className="flex flex-col gap-1">
-          <div className="flex items-baseline justify-between font-mono text-[10px] tracking-[0.18em]">
+          <div className="flex items-baseline justify-between font-mono text-[11px] tracking-[0.18em]">
             <span style={{ color: "color-mix(in srgb, var(--ink) 67%, transparent)" }}>PLATE Nº {plateNo}</span>
             <span className="flex items-center gap-2.5">
               <span style={{ color: "color-mix(in srgb, var(--ink) 47%, transparent)" }}>PERSPECTIVE</span>
               <button
                 onClick={toggleDark}
                 title={dark ? "Switch to day plate" : "Switch to night plate"}
-                className="transition-all duration-200 hover:rotate-45 hover:scale-125 hover:opacity-100"
+                className="icon-button -my-1.5 -mx-1 flex size-6 items-center justify-center"
                 style={{ color: ORANGE_DEEP, opacity: 0.85 }}
               >
                 {dark ? <Sun size={13} /> : <Moon size={13} />}
@@ -255,7 +283,7 @@ export default function Home() {
           >
             Form Study
           </h1>
-          <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 53%, transparent)" }}>
+          <p className="font-mono text-[12px]" style={{ color: "color-mix(in srgb, var(--ink) 53%, transparent)" }}>
             drawing the basic forms in space
           </p>
           <div className="mt-2 flex items-center gap-1.5">
@@ -277,15 +305,15 @@ export default function Home() {
                   key={id}
                   onClick={() => handleShapeChange(id)}
                   title={SHAPE_LABELS[id]}
-                  className="flex flex-col items-center gap-1 border pt-2 pb-1.5 transition-colors duration-150 hover:bg-white"
+                  className="shape-tile flex flex-col items-center gap-1 border pt-2 pb-1.5 transition-colors duration-150"
                   style={{
                     borderColor: active ? ORANGE_DEEP : "color-mix(in srgb, var(--ink) 20%, transparent)",
                     background: active ? ORANGE : undefined,
-                    color: active ? INK_DEEP : "color-mix(in srgb, var(--ink) 73%, transparent)",
+                    color: active ? "var(--ink-deep-fixed)" : "color-mix(in srgb, var(--ink) 73%, transparent)",
                   }}
                 >
                   <Icon size={24} strokeWidth={1.5} />
-                  <span className="font-mono text-[9px] tracking-wider">
+                  <span className="font-mono text-[10px] tracking-wider">
                     {SHAPE_LABELS[id]}
                   </span>
                 </button>
@@ -323,7 +351,7 @@ export default function Home() {
             <>
               <ToggleRow label="COIL" checked={coilOn} onChange={setCoilOn} />
               {coilOn && (
-                <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+                <p className="-mt-1 font-mono text-[12px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
                   coil wraps the bend around the vertical axis — the bend sets the coil&apos;s width, so no bend means no coil
                 </p>
               )}
@@ -343,7 +371,7 @@ export default function Home() {
                 onValueChange={(v) => setFocalLength(v as number)}
               />
             </div>
-            <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+            <p className="font-mono text-[12px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
               {ortho
                 ? "parallel projection — depth without diminution"
                 : focalLength < 28
@@ -381,7 +409,7 @@ export default function Home() {
                   </div>
                 </ControlRow>
               ))}
-              <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+              <p className="-mt-1 font-mono text-[12px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
                 spin slides the VPs — tilt &amp; roll swing the form&apos;s horizon off eye level
               </p>
             </>
@@ -403,60 +431,19 @@ export default function Home() {
                 onValueChange={(v) => setVertPos((v as number) / 100)}
               />
             </div>
-            <p className="font-mono text-[11px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+            <p className="font-mono text-[12px]" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
               {posText}
             </p>
           </ControlRow>
 
-          {shapeId !== "cube" && showContours && (
-            <ControlRow
-              label="CONTOUR RINGS"
-              valueText={`${uRings} ring${uRings !== 1 ? "s" : ""}`}
-            >
-              <Slider
-                min={1} max={16} step={1}
-                value={uRings}
-                onValueChange={(v) => setURings(v as number)}
-              />
-            </ControlRow>
-          )}
-
-          <div className="flex flex-col gap-3 pt-1">
-            {shapeId !== "cube" && (
-              <ToggleRow label="SHOW CONTOURS" checked={showContours} onChange={setShowContours} />
-            )}
-            {shapeId !== "cube" && showContours && (
-              <ToggleRow label="WRAP CONTOURS" checked={wrapContours} onChange={setWrapContours} />
-            )}
-            {shapeId === "tube" && (
-              <>
-                <ToggleRow label="FACING TINT" checked={facingTint} onChange={setFacingTint} />
-                {facingTint && (
-                  <p className="-mt-1 font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
-                    <span style={{ color: ORANGE_DEEP }}>orange</span> ellipses open toward you — ink ones turn away. orbit and watch the flip point travel the bends
-                  </p>
-                )}
-              </>
-            )}
-            {shapeId !== "cube" && shapeId !== "tube" && (
-              <ToggleRow label="ELLIPSE DEGREES" checked={showDegrees} onChange={setShowDegrees} />
-            )}
-            <ToggleRow label="SHOW GROUND" checked={showGround} onChange={setShowGround} />
-            <ToggleRow label="SHOW GUIDES" checked={guides} onChange={setGuides} />
-            {shapeId === "cube" && (
-              <ToggleRow label="SHOW AXES" checked={showAxes} onChange={setShowAxes} />
-            )}
-            <ToggleRow label="SHOW TOP VIEW" checked={showTopView} onChange={setShowTopView} />
-            <ToggleRow label="CONE OF VISION" checked={showCone} onChange={setShowCone} />
-            <ToggleRow label="TURNTABLE" checked={turntable} onChange={setTurntable} />
-          </div>
+          <ToggleRow label="TURNTABLE" checked={turntable} onChange={setTurntable} />
 
           <div className="mt-1 flex gap-1.5">
             {([["−", -1], ["+", 1]] as const).map(([sym, dir]) => (
               <button
                 key={sym}
                 onClick={() => setZoomAction(a => ({ dir, n: a.n + 1 }))}
-                className="flex-1 border px-3 py-2 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                className="flex-1 border px-3 py-2 font-mono text-[12px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
                 style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
               >
                 ZOOM {sym}
@@ -466,7 +453,7 @@ export default function Home() {
           <div className="flex gap-1.5">
             <button
               onClick={resetView}
-              className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+              className="flex-1 border px-3 py-2.5 font-mono text-[12px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
               style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
             >
               ⟲ RESET VIEW
@@ -482,9 +469,52 @@ export default function Home() {
           </div>
         </section>
 
-        {/* 04 · Repeat */}
+        {/* 04 · Layers */}
+        <section className="flex flex-col gap-3">
+          <SectionHeader n="04" title="LAYERS" />
+          <div className="grid grid-cols-2 gap-1.5">
+            <LayerChip label="GROUND" checked={showGround} onChange={setShowGround} />
+            <LayerChip label="GUIDES" checked={guides} onChange={setGuides} />
+            {shapeId === "cube" && (
+              <LayerChip label="AXES" checked={showAxes} onChange={setShowAxes} />
+            )}
+            <LayerChip label="TOP VIEW" checked={showTopView} onChange={setShowTopView} />
+            <LayerChip label="CONE 60°" checked={showCone} onChange={setShowCone} />
+            {shapeId !== "cube" && (
+              <LayerChip label="CONTOURS" checked={showContours} onChange={setShowContours} />
+            )}
+            {shapeId !== "cube" && showContours && (
+              <LayerChip label="WRAP" checked={wrapContours} onChange={setWrapContours} />
+            )}
+            {shapeId !== "cube" && shapeId !== "tube" && (
+              <LayerChip label="DEGREES" checked={showDegrees} onChange={setShowDegrees} />
+            )}
+            {shapeId === "tube" && (
+              <LayerChip label="FACING" checked={facingTint} onChange={setFacingTint} />
+            )}
+          </div>
+          {shapeId !== "cube" && showContours && (
+            <ControlRow
+              label="CONTOUR RINGS"
+              valueText={`${uRings} ring${uRings !== 1 ? "s" : ""}`}
+            >
+              <Slider
+                min={1} max={16} step={1}
+                value={uRings}
+                onValueChange={(v) => setURings(v as number)}
+              />
+            </ControlRow>
+          )}
+          {shapeId === "tube" && facingTint && (
+            <p className="font-mono text-[12px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+              <span style={{ color: ORANGE_DEEP }}>orange</span> ellipses open toward you — ink ones turn away
+            </p>
+          )}
+        </section>
+
+        {/* 05 · Repeat */}
         <section className="flex flex-col gap-4">
-          <SectionHeader n="04" title="REPEAT" />
+          <SectionHeader n="05" title="REPEAT" />
           <ControlRow
             label="COPIES"
             valueText={copies === 1 ? "off" : `${copies} in a row`}
@@ -502,26 +532,26 @@ export default function Home() {
                 value={Math.round(spacing * 100)}
                 onValueChange={(v) => setSpacing((v as number) / 100)}
               />
-              <p className="font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+              <p className="font-mono text-[12px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
                 equal steps in space shrink lawfully toward the VP
               </p>
             </ControlRow>
           )}
         </section>
 
-        {/* 05 · Drill */}
+        {/* 06 · Drill */}
         <section className="flex flex-col gap-3">
-          <SectionHeader n="05" title="DRILL" />
+          <SectionHeader n="06" title="DRILL" />
           {drill === "off" ? (
             <>
               <button
                 onClick={startDrill}
-                className="w-full border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                className="w-full border px-3 py-2.5 font-mono text-[12px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
                 style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
               >
                 ▶ GUESS THE BOX
               </button>
-              <p className="font-mono text-[11px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
+              <p className="font-mono text-[12px] leading-relaxed" style={{ color: "color-mix(in srgb, var(--ink) 60%, transparent)" }}>
                 only horizon, VPs &amp; one starting edge remain — imagine the cube, then reveal
               </p>
             </>
@@ -530,7 +560,7 @@ export default function Home() {
               {drill === "guess" ? (
                 <button
                   onClick={() => setDrill("reveal")}
-                  className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] text-[var(--ink-deep-fixed)] transition-colors duration-150"
+                  className="flex-1 border px-3 py-2.5 font-mono text-[12px] tracking-[0.18em] text-[var(--ink-deep-fixed)] transition-colors duration-150"
                   style={{ borderColor: ORANGE_DEEP, background: ORANGE }}
                 >
                   ◉ REVEAL
@@ -538,7 +568,7 @@ export default function Home() {
               ) : (
                 <button
                   onClick={() => { randomPose(); setDrill("guess") }}
-                  className="flex-1 border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                  className="flex-1 border px-3 py-2.5 font-mono text-[12px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
                   style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
                 >
                   ⟳ NEW POSE
@@ -546,7 +576,7 @@ export default function Home() {
               )}
               <button
                 onClick={() => setDrill("off")}
-                className="border px-3 py-2.5 font-mono text-[11px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
+                className="border px-3 py-2.5 font-mono text-[12px] tracking-[0.18em] transition-colors duration-150 text-[var(--orange-deep)] hover:bg-[var(--orange)] hover:text-[var(--ink-deep-fixed)]"
                 style={{ borderColor: "color-mix(in srgb, var(--orange-deep) 47%, transparent)" }}
               >
                 EXIT
@@ -557,7 +587,7 @@ export default function Home() {
 
         {/* Legend / footer */}
         <footer
-          className="mt-auto flex flex-col gap-2 border-t pt-4 font-mono text-[11px]"
+          className="mt-auto flex flex-col gap-2 border-t pt-4 font-mono text-[12px]"
           style={{ borderColor: "color-mix(in srgb, var(--ink) 15%, transparent)", color: "color-mix(in srgb, var(--ink) 53%, transparent)" }}
         >
           <div className="flex items-center gap-2">
