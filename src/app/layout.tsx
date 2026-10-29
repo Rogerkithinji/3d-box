@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
+import { Barlow_Condensed, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,10 +12,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const instrumentSerif = Instrument_Serif({
-  variable: "--font-instrument",
-  weight: "400",
-  style: ["normal", "italic"],
+// Title lettering: a condensed DIN-style face, the kind stencilled into a
+// drawing's title block
+const barlowCondensed = Barlow_Condensed({
+  variable: "--font-title",
+  weight: ["500", "600"],
   subsets: ["latin"],
 });
 
@@ -32,7 +33,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${barlowCondensed.variable} h-full antialiased`}
     >
       <body className="h-full flex flex-col">{children}</body>
     </html>
